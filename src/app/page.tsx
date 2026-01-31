@@ -34,17 +34,8 @@ export default function App() {
   const [dragStartPos, setDragStartPos] = useState<{id: string, x: number, y: number} | null>(null); 
 
   const [activeTether, setActiveTether] = useState<Connection | null>(null); 
-  const [draggingWireId, setDraggingWireId] = useState<string | null>(null); 
-  const [wireDragStart, setWireDragStart] = useState<{x: number, y: number} | null>(null);   
   const tetherTimer = useRef<NodeJS.Timeout | null>(null);
   const [simulatedOffset, setSimulatedOffset] = useState(0);
-  const [isDraggingDrawer, setIsDraggingDrawer] = useState(false);
-
-  // Gesture State for Drawer
-  const touchStartY = useRef<number | null>(null);
-  const initialOffset = useRef<number>(0);
-  const dragDistance = useRef<number>(0);
-  const offsetRef = useRef(simulatedOffset);
 
   const [foldersRegistry, setFoldersRegistry] = useState<Record<string, FolderData>>({
     'actions': { id: 'actions', title: 'Actions', icon: 'Zap', color: 'bg-blue-600', items: [
@@ -69,14 +60,13 @@ export default function App() {
   const connRef = useRef(connections);
   useEffect(() => { itemsRef.current = canvasItems; }, [canvasItems]);
   useEffect(() => { connRef.current = connections; }, [connections]);
-  useEffect(() => { offsetRef.current = simulatedOffset; }, [simulatedOffset]);
 
   const lastTap = useRef(0);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
   const mouseOffset = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
   const panOffsetStart = useRef({ x: 0, y: 0 });
-  const lastValidPos = useRef({ x: 128, y: 184 });
+  const lastValidPos = useRef({ x: 128, y: 128 + HEADER_OFFSET });
 
   const [editingItem, setEditingItem] = useState<CanvasItem | null>(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
@@ -140,26 +130,24 @@ export default function App() {
       
       const isRecursion = isDescendantOf(other.instanceId, dId, connRef.current);
       
-      // Proximity check for revealing dots (Stage 1)
+      // Stage 1: Reveal dots early
       if (adx > DETECTION_RANGE || ady > DETECTION_RANGE) return;
 
       let targetPort = null; let sourcePort = null;
       let color = 'bg-slate-300';
 
-      // Logic: Source determines color and port based on relative position
+      // Source-Driven Port Logic
       if (adx < SNAP_TOLERANCE) {
-          if (dy > 0) { targetPort = 'bottom'; sourcePort = 'top'; color = 'bg-emerald-500'; } // Success Flow
-          else { targetPort = 'top'; sourcePort = 'bottom'; color = 'bg-blue-500'; } // Generic Input
+          if (dy > 0) { targetPort = 'bottom'; sourcePort = 'top'; color = 'bg-emerald-500'; } 
+          else { targetPort = 'top'; sourcePort = 'bottom'; color = 'bg-blue-500'; } 
       } else if (ady < SNAP_TOLERANCE) {
-          if (dx > 0) { targetPort = 'right'; sourcePort = 'left'; color = 'bg-rose-500'; } // Error Flow
-          else { targetPort = 'left'; sourcePort = 'right'; color = 'bg-amber-400'; } // Peek/Attach
+          if (dx > 0) { targetPort = 'right'; sourcePort = 'left'; color = 'bg-rose-500'; } 
+          else { targetPort = 'left'; sourcePort = 'right'; color = 'bg-amber-400'; } 
       }
 
-      // Recursion Rule: Force Blue Snap
+      // Recursion Rule: Strictly Blue Top
       if (isRecursion) {
-          targetPort = 'top'; 
-          color = 'bg-blue-500';
-          // Determine which side of source we are exiting
+          targetPort = 'top'; color = 'bg-blue-500';
           if (dy > adx) sourcePort = 'bottom';
           else if (dx > ady) sourcePort = 'right';
           else sourcePort = 'left';
@@ -168,24 +156,19 @@ export default function App() {
       if (targetPort && sourcePort) {
           const snapX = other.x + (targetPort === 'right' ? 32 : (targetPort === 'left' ? -32 : 0));
           const snapY = other.y + (targetPort === 'bottom' ? 32 : (targetPort === 'top' ? -32 : 0));
-          
-          // Calculate distance between latch points for "Touching" (Stage 2)
           const dotDist = Math.sqrt(Math.pow(snapX - dragNode.x, 2) + Math.pow(snapY - dragNode.y, 2));
 
           ghosts.push({ 
             id: 'ghost',
             sourceId: other.instanceId, sourceSide: targetPort, targetId: dId, targetSide: sourcePort,
             color, displayColor: color, snapX, snapY,
-            dotDistance: dotDist // Custom field for tracking touching
+            dotDistance: dotDist 
           } as any);
       }
     });
 
     if (ghosts.length === 0) return [];
-    
-    // Nearest Point Rule
     ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
-    
     return [ghosts[0]];
   };
 
@@ -197,10 +180,9 @@ export default function App() {
   };
 
   const animateTo = (target: number) => {
-    setIsDraggingDrawer(false);
-    const start = offsetRef.current; 
+    const start = simulatedOffset; 
     const startTime = performance.now();
-    const duration = 60; 
+    const duration = 100; 
     const step = (now: number) => {
       const p = Math.min((now - startTime) / duration, 1); 
       const easedP = p * (2 - p);
@@ -214,14 +196,10 @@ export default function App() {
     if (!editingItem) return;
     const dna = { name: studioName, icon: studioIcon, payload: studioPayload, logic: studioLogic, setup: studioSetup, isRegistered: true };
     setCanvasItems(prev => prev.map(i => i.instanceId === editingItem.instanceId ? { ...i, ...dna } : i));
-    
     setFoldersRegistry(prev => {
         const exists = prev.actions.items.some(i => i.name === dna.name);
         if (exists) return prev;
-        return {
-            ...prev,
-            actions: { ...prev.actions, items: [...prev.actions.items, { ...dna }] }
-        };
+        return { ...prev, actions: { ...prev.actions, items: [...prev.actions.items, { ...dna }] } };
     });
     setIsStudioOpen(false); setEditingItem(null);
   };
@@ -268,22 +246,16 @@ export default function App() {
       const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
 
-      if (dragStartPos && !isDragging && !draggingWireId) {
+      if (dragStartPos && !isDragging) {
           const dist = Math.sqrt(Math.pow(clientX - dragStartPos.x, 2) + Math.pow(clientY - dragStartPos.y, 2));
           if (dist > DRAG_THRESHOLD) { setIsDragging(true); setDraggingId(dragStartPos.id); if (pressTimer.current) clearTimeout(pressTimer.current); }
       }
 
-      if (!isDragging && !isPanning && !draggingWireId) return;
+      if (!isDragging && !isPanning) return;
 
       if (isPanning) {
         setViewOffset({ x: panOffsetStart.current.x + (clientX - panStart.current.x), y: panOffsetStart.current.y + (clientY - panStart.current.y) });
         return;
-      }
-
-      if (draggingWireId) {
-          const worldX = clientX - viewOffset.x; const worldY = clientY - viewOffset.y - HEADER_OFFSET; 
-          setConnections(prev => prev.map(c => c.id === draggingWireId ? { ...c, waypoint: { x: worldX, y: worldY } } : c));
-          return;
       }
 
       const x = clientX - mouseOffset.current.x; const y = clientY - mouseOffset.current.y;
@@ -292,9 +264,9 @@ export default function App() {
       const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
       setGhostConnections(ghosts);
 
+      // Stage 2: Handshake (Persistent tether after touching)
       if (!activeTether) {
           const best = ghosts[0] as any;
-          // Handshake logic: dots must be "touching" (dist < 12) for duration
           if (best && best.dotDistance < 12) {
               if (!tetherTimer.current) {
                   tetherTimer.current = setTimeout(() => {
@@ -304,24 +276,12 @@ export default function App() {
           } else { 
               if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; } 
           }
-      } else { 
-          setGhostConnections([]); 
-          // Check if we pulled away
-          const distToSnap = Math.sqrt(Math.pow(activeTether.snapX! - x, 2) + Math.pow(activeTether.snapY! - y, 2));
-          if (distToSnap > 48) setActiveTether(null);
-      }
+      } 
       setTrashActive(clientY > window.innerHeight - 100);
     };
 
     const handleUp = (e: MouseEvent | TouchEvent) => {
       setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
-      if (draggingWireId) {
-          setDraggingWireId(null);
-          const cX = 'clientX' in e ? e.clientX : (e as TouchEvent).changedTouches[0].clientX;
-          const cY = 'clientY' in e ? e.clientY : (e as TouchEvent).changedTouches[0].clientY;
-          if (wireDragStart && Math.sqrt(Math.pow(cX - wireDragStart.x, 2) + Math.pow(cY - wireDragStart.y, 2)) < DRAG_THRESHOLD) setConnections(prev => prev.filter(c => c.id !== draggingWireId));
-          setWireDragStart(null); return;
-      }
       if (isPanning) { setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); setIsPanning(false); return; }
       if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; }
       if (!isDragging) return; 
@@ -329,74 +289,28 @@ export default function App() {
       const droppedItem = itemsRef.current.find(i => i.instanceId === draggingId);
       if (!droppedItem) return; 
       
-      const instantGhosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x: droppedItem.x, y: droppedItem.y });
-      const bestSnap = instantGhosts[0]; 
-
       setCanvasItems(prev => {
         const item = prev.find(i => i.instanceId === draggingId);
         if (!item) return prev;
         let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
-        if (bestSnap && !activeTether) { finalX = bestSnap.snapX!; finalY = bestSnap.snapY!; }
+        
+        // Strict Adjacent Snap only
+        const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x: item.x, y: item.y });
+        const best = ghosts[0] as any;
+        if (best && best.dotDistance < 8) { finalX = best.snapX!; finalY = best.snapY!; }
+
         const isOccupied = prev.some(other => other.instanceId !== draggingId && Math.abs(other.x - finalX) < 5 && Math.abs(other.y - finalY) < 5);
         if (isOccupied) return prev.map(i => i.instanceId === draggingId ? { ...i, x: lastValidPos.current.x, y: lastValidPos.current.y } : i);
-        return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY, isNew: false } : i);
+        return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
       });
 
       if (activeTether) { setConnections(prev => [...prev, { ...activeTether, id: `conn_${Date.now()}` }]); } 
-      else if (bestSnap && (bestSnap as any).dotDistance < 12) { setConnections(prev => [...prev, { ...bestSnap, id: `conn_${Date.now()}` }]); }
       setActiveTether(null); setGhostConnections([]); setIsDragging(false); setDraggingId(null); setTrashActive(false);
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
-  }, [isDragging, isPanning, draggingId, activeTether, draggingWireId, dragStartPos, viewOffset, wireDragStart]); 
-
-  // --- DRAWER GESTURES ---
-  const handleDrawerPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
-    const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
-    touchStartY.current = clientY;
-    initialOffset.current = offsetRef.current;
-    dragDistance.current = 0;
-    setIsDraggingDrawer(true);
-  };
-
-  useEffect(() => {
-    const handleMove = (e: MouseEvent | TouchEvent) => {
-      if (touchStartY.current === null) return;
-      const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
-      const delta = touchStartY.current - clientY;
-      dragDistance.current = Math.abs(delta);
-      const sensitivity = 160; 
-      const nextOffset = Math.max(0, Math.min(1, initialOffset.current + delta / sensitivity));
-      setSimulatedOffset(nextOffset);
-    };
-
-    const handleUp = () => {
-      if (touchStartY.current === null) return;
-      touchStartY.current = null;
-      if (dragDistance.current > 15) {
-          if (offsetRef.current > 0.4) animateTo(1);
-          else animateTo(0);
-      } else {
-        setIsDraggingDrawer(false);
-      }
-    };
-
-    window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
-    return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
-  }, []);
-
-  const handleOpenFolder = (fId: string) => {
-    if (offsetRef.current < 0.8) animateTo(1);
-    else setActiveFolderView(fId);
-  };
-
-  const handleLauncherNavigate = (pageId: string) => {
-    setCurrentPageId(pageId);
-    setActiveFolderView(null);
-    animateTo(0);
-  };
+  }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset]); 
 
   return (
     <div className="relative w-full h-screen bg-[#F8FAFC] overflow-hidden select-none font-sans">
@@ -429,19 +343,6 @@ export default function App() {
 
             <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className="w-full h-full relative">
                 <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-visible">
-                    <defs>
-                        {connections.map(conn => {
-                            const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
-                            return (
-                                <linearGradient key={`grad-${conn.id}`} id={`grad-${conn.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                                    <stop offset="0%" stopColor={c} />
-                                    <stop offset="50%" stopColor={c} stopOpacity="0.8" />
-                                    <stop offset="100%" stopColor={c} />
-                                </linearGradient>
-                            );
-                        })}
-                    </defs>
-                    
                     {connections.map(conn => {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
@@ -453,11 +354,9 @@ export default function App() {
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         
-                        let d = conn.waypoint 
-                            ? `M ${sX} ${sY} L ${conn.waypoint.x} ${sY} L ${conn.waypoint.x} ${conn.waypoint.y} L ${tX} ${conn.waypoint.y} L ${tX} ${tY}` 
-                            : getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.id);
-                            
-                        return <path key={conn.id} d={d} stroke={`url(#grad-${conn.id})`} strokeWidth="3.5" fill="none" strokeLinecap="round" className="drop-shadow-sm transition-all duration-75" />;
+                        let d = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.id);
+                        const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
+                        return <path key={conn.id} d={d} stroke={c} strokeWidth="3.5" fill="none" strokeLinecap="round" className="drop-shadow-sm transition-all duration-75" />;
                     })}
                     
                     {activeTether && (() => {
@@ -490,7 +389,7 @@ export default function App() {
                   </div>
                 ))}
 
-                {/* Segment Balls */}
+                {/* Segment Balls - Anchored 50% */}
                 {connections.map(conn => {
                     const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                     if(!s || !t) return null;
@@ -499,11 +398,11 @@ export default function App() {
 
                     const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                    const midX = conn.waypoint ? conn.waypoint.x : (sX + tX) / 2, midY = conn.waypoint ? conn.waypoint.y : (sY + tY) / 2;
+                    const midX = (sX + tX) / 2, midY = (sY + tY) / 2;
                     const c = conn.color.includes('rose') ? 'bg-rose-500' : conn.color.includes('emerald') ? 'bg-emerald-500' : conn.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
                     return (
-                        <div key={`ball_${conn.id}`} className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] cursor-pointer hover:scale-125 transition-transform shadow-md pointer-events-auto`}
-                             style={{ left: midX - 8, top: midY - 8 }} onMouseDown={(e) => { e.stopPropagation(); setWireDragStart({ x: e.clientX, y: e.clientY }); setDraggingWireId(conn.id); }}>
+                        <div key={`ball_${conn.id}`} className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] shadow-md pointer-events-none`}
+                             style={{ left: midX - 8, top: midY - 8 }}>
                             <div className={`w-2 h-2 rounded-full ${c} animate-pulse-subtle`} />
                         </div>
                     )
@@ -519,18 +418,21 @@ export default function App() {
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           
-                          // Recursion logic: only 'top' blue is an attachment target
-                          const isInvalidRecursionPort = involvesRecursion && lp.id !== 'top';
+                          // Stage 1: Guidance (Show dots early)
+                          const isGuidance = !!ghost;
+                          const isConnected = !!outgoingLink || !!incomingLink;
+                          const isVisible = isGuidance || isConnected;
                           
-                          const isVisible = !!ghost || !!outgoingLink || !!incomingLink;
+                          // Recursion logic: only Blue Top allowed
+                          const isForbiddenRecursion = involvesRecursion && lp.id !== 'top';
+                          
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : lp.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
                           
                           return (
-                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white cursor-pointer pointer-events-auto shadow-sm
-                                    ${outgoingLink || incomingLink ? c : 'bg-slate-300'}
+                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm
+                                    ${isConnected ? c : 'bg-slate-300'}
                                     ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
-                                    ${ghost ? (isInvalidRecursionPort ? 'bg-slate-400 opacity-50' : 'ring-4 ring-slate-200 scale-150 animate-pulse') : ''}
-                                    hover:scale-150
+                                    ${ghost ? (isForbiddenRecursion ? 'bg-slate-400 opacity-50 grayscale' : 'ring-4 ring-slate-200 scale-150 animate-pulse') : ''}
                                 `} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} 
                             />
                           );
@@ -551,19 +453,11 @@ export default function App() {
         )}
       </main>
 
-      <div className={`fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-xs h-24 flex items-end justify-center pb-6 transition-all duration-300 pointer-events-none z-[400] ${isDragging ? 'translate-y-0 opacity-100' : 'translate-y-32 opacity-0'}`}>
-        <div className={`p-5 rounded-full transition-all border-2 ${trashActive ? 'bg-rose-500 text-white scale-110 border-rose-400 shadow-2xl' : 'bg-white/80 text-slate-400 border-slate-200'}`}><Trash2 size={24} /></div>
-      </div>
-      
       <div className="pointer-events-auto">
-        <AndroidFolder isMain={true} activeView={activeFolderView} onOpen={setActiveFolderView} onLaunch={handleLauncherNavigate} registry={foldersRegistry} windowSize={windowSize} simulatedOffset={simulatedOffset} />
-        <div 
-            className="fixed bottom-[40px] left-[40px] w-12 h-12 z-[100] cursor-pointer"
-            onMouseDown={handleDrawerPointerDown} onTouchStart={handleDrawerPointerDown}
-            onClick={() => dragDistance.current < 10 && (simulatedOffset > 0.5 ? animateTo(0) : animateTo(1))}
-        >
+        <AndroidFolder isMain={true} activeView={activeFolderView} onOpen={setActiveFolderView} onLaunch={(id) => { setCurrentPageId(id); animateTo(0); }} registry={foldersRegistry} windowSize={windowSize} simulatedOffset={simulatedOffset} />
+        <div className="fixed bottom-[40px] left-[40px] w-12 h-12 z-[100] cursor-pointer">
             {['actions', 'triggers', 'logic'].map((f, i) => (
-                <AndroidFolder key={f} fId={f} index={i} registry={foldersRegistry} activeView={activeFolderView} onOpen={handleOpenFolder} onBirth={handleSmartBirth} windowSize={windowSize} simulatedOffset={simulatedOffset} isStackedItem isDraggingDrawer={isDraggingDrawer} />
+                <AndroidFolder key={f} fId={f} index={i} registry={foldersRegistry} activeView={activeFolderView} onOpen={setActiveFolderView} onBirth={handleSmartBirth} windowSize={windowSize} simulatedOffset={simulatedOffset} isStackedItem />
             ))}
         </div>
       </div>
@@ -588,3 +482,4 @@ export default function App() {
     </div>
   );
 }
+
