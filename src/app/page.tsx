@@ -18,6 +18,7 @@ export default function App() {
   // --- STATE ---
   const [currentPageId, setCurrentPageId] = useState('studio');
   const [activeFolderView, setActiveFolderView] = useState<string | null>(null);
+  // Initialize with reasonable defaults to avoid NaN before window is available
   const [windowSize, setWindowSize] = useState({ w: 1024, h: 768 });
   
   const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([
@@ -96,6 +97,7 @@ export default function App() {
   const [deploymentValues, setDeploymentValues] = useState({});
 
   useEffect(() => {
+    // Correctly set window size on mount to avoid hydration mismatch and NaN
     setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
@@ -192,7 +194,7 @@ export default function App() {
     setIsDraggingDrawer(false);
     const start = offsetRef.current; 
     const startTime = performance.now();
-    const duration = 250;
+    const duration = 180; // Optimized speed: 250 -> 180
     const step = (now: number) => {
       const p = Math.min((now - startTime) / duration, 1); 
       // Cubic easing
@@ -352,7 +354,7 @@ export default function App() {
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
       const delta = touchStartY.current - clientY;
       dragDistance.current = Math.abs(delta);
-      const sensitivity = 180; // pixels to reach full expansion
+      const sensitivity = 160; // Optimized sensitivity
       const nextOffset = Math.max(0, Math.min(1, initialOffset.current + delta / sensitivity));
       setSimulatedOffset(nextOffset);
     };
@@ -361,7 +363,7 @@ export default function App() {
       if (touchStartY.current === null) return;
       touchStartY.current = null;
       if (dragDistance.current > 15) {
-          if (offsetRef.current > 0.45) animateTo(1);
+          if (offsetRef.current > 0.4) animateTo(1);
           else animateTo(0);
       } else {
         setIsDraggingDrawer(false);
