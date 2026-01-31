@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
@@ -9,7 +10,7 @@ import {
 } from '@/lib/types';
 import { 
   HEADER_OFFSET, LATCH_POINTS, SNAP_TOLERANCE, DETECTION_RANGE, TETHER_DELAY, 
-  UNIT_SIZE_VAL, DRAG_THRESHOLD, LONG_PRESS_MS, SELECTABLE_ICONS 
+  UNIT_SIZE_VAL, DRAG_THRESHOLD, LONG_PRESS_MS, SELECTABLE_ICONS, DRAG_VISUAL_OFFSET 
 } from '@/lib/constants';
 import { getSmartPath, snapToGrid } from '@/lib/pathing';
 
@@ -217,7 +218,8 @@ export default function App() {
     const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     setDragStartPos({ id: item.instanceId, x: clientX, y: clientY });
-    mouseOffset.current = { x: clientX - item.x, y: clientY - item.y };
+    // Add visual offset to the starting mouse offset calculation
+    mouseOffset.current = { x: clientX - item.x, y: clientY - item.y + DRAG_VISUAL_OFFSET };
     lastValidPos.current = { x: item.x, y: item.y };
     pressTimer.current = setTimeout(() => { setIsDragging(true); setDraggingId(item.instanceId); }, LONG_PRESS_MS);
   };
@@ -267,7 +269,8 @@ export default function App() {
 
       if (!activeTether) {
           const best = ghosts[0] as any;
-          if (best && best.dotDistance < 12) {
+          // Increased threshold for more forgiving handshakes
+          if (best && best.dotDistance < 24) {
               if (!tetherTimer.current) {
                   tetherTimer.current = setTimeout(() => {
                       if(best) { setActiveTether({ ...best }); setGhostConnections([]); }
@@ -296,7 +299,7 @@ export default function App() {
         
         const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x: item.x, y: item.y });
         const best = ghosts[0] as any;
-        if (best && best.dotDistance < 8) { finalX = best.snapX!; finalY = best.snapY!; }
+        if (best && best.dotDistance < 24) { finalX = best.snapX!; finalY = best.snapY!; }
 
         const isOccupied = prev.some(other => other.instanceId !== draggingId && Math.abs(other.x - finalX) < 5 && Math.abs(other.y - finalY) < 5);
         if (isOccupied) return prev.map(i => i.instanceId === draggingId ? { ...i, x: lastValidPos.current.x, y: lastValidPos.current.y } : i);
@@ -307,7 +310,7 @@ export default function App() {
       setActiveTether(null); setGhostConnections([]); setIsDragging(false); setDraggingId(null); setTrashActive(false);
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
+    window.addEventListener('touchmove', handleMove); window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
   }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset]); 
 

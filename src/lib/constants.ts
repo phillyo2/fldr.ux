@@ -3,13 +3,14 @@ import { LatchPoint } from './types';
 
 export const GRID_SIZE = 32;
 export const UNIT_SIZE_VAL = 32; 
-export const SNAP_TOLERANCE = 32; 
-export const DETECTION_RANGE = 128; // Dots appear sooner
-export const TETHER_DELAY = 100; 
+export const SNAP_TOLERANCE = 48; // Increased for easier snapping
+export const DETECTION_RANGE = 128; 
+export const TETHER_DELAY = 100; // Snappy 100ms window
 export const HEADER_OFFSET = 56;
 export const ICON_SIZE = 24; 
 export const LONG_PRESS_MS = 150; 
 export const DRAG_THRESHOLD = 5; 
+export const DRAG_VISUAL_OFFSET = 40; // Pixels to shift tile up when dragging
 
 export const SELECTABLE_ICONS = [
   'Terminal', 'Globe', 'Database', 'Bell', 'Send', 'Activity', 
