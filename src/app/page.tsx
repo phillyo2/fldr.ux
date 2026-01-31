@@ -192,7 +192,7 @@ export default function App() {
     setIsDraggingDrawer(false);
     const start = offsetRef.current; 
     const startTime = performance.now();
-    const duration = 60; // Lightning-fast snapping
+    const duration = 80; // High speed snapping
     const step = (now: number) => {
       const p = Math.min((now - startTime) / duration, 1); 
       const easedP = p * (2 - p);
@@ -416,6 +416,7 @@ export default function App() {
              onContextMenu={(e) => e.preventDefault()}
              style={{ touchAction: 'none' }}>
             
+            {/* ENHANCED GRID: Lanes shifted 16, 16 */}
             <div className="absolute inset-0 pointer-events-none opacity-100" 
                style={{ 
                    backgroundImage: `
@@ -423,22 +424,35 @@ export default function App() {
                       url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M16 12v8M12 16h8' stroke='%23cbd5e1' stroke-width='0.3' stroke-linecap='round'/%3E%3C/svg%3E")
                    `, 
                    backgroundSize: `32px 32px, 32px 32px`,
-                   backgroundPosition: `${viewOffset.x % 32}px ${viewOffset.y % 32}px, ${viewOffset.x % 32}px ${viewOffset.y % 32}px`,
+                   backgroundPosition: `${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px, ${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px`,
                    backgroundRepeat: 'repeat, repeat'
                }} 
             />
 
             <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className="w-full h-full relative">
                 <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-visible">
+                    <defs>
+                        {connections.map(conn => {
+                            const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
+                            return (
+                                <linearGradient key={`grad-${conn.id}`} id={`grad-${conn.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" stopColor={c} />
+                                    <stop offset="50%" stopColor={c} stopOpacity="0.8" />
+                                    <stop offset="100%" stopColor={c} />
+                                </linearGradient>
+                            );
+                        })}
+                    </defs>
+                    
                     {connections.map(conn => {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         let d = conn.waypoint ? `M ${sX} ${sY} L ${conn.waypoint.x} ${sY} L ${conn.waypoint.x} ${conn.waypoint.y} L ${tX} ${conn.waypoint.y} L ${tX} ${tY}` : getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide);
-                        const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
-                        return <path key={conn.id} d={d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" />;
+                        return <path key={conn.id} d={d} stroke={`url(#grad-${conn.id})`} strokeWidth="3.5" fill="none" strokeLinecap="round" className="drop-shadow-sm transition-all duration-300" />;
                     })}
+                    
                     {activeTether && (() => {
                         const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === draggingId);
                         if (!s || !t) return null;
@@ -463,38 +477,43 @@ export default function App() {
                   </div>
                 ))}
 
-                {canvasItems.map(item => (
-                  <div key={`latch_${item.instanceId}`} className="absolute pointer-events-none z-[2000]" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                      {LATCH_POINTS.map(lp => {
-                        const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
-                        const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
-                        const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                        const isVisible = !!ghost || !!outgoingLink || !!incomingLink;
-                        return (
-                          <div key={lp.id} className={`absolute w-2.5 h-2.5 rounded-full transition-all duration-200 border border-white cursor-pointer pointer-events-auto
-                                  ${outgoingLink || incomingLink ? (outgoingLink ? outgoingLink.color : incomingLink.color) : 'bg-slate-300'}
-                                  ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
-                                  ${ghost ? 'ring-2 ring-slate-300 scale-125 animate-pulse' : ''}
-                              `} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} 
-                          />
-                        );
-                      })}
-                  </div>
-                ))}
-
+                {/* ENHANCED TOUCH DOTS on Connections */}
                 {connections.map(conn => {
                     const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                     if(!s || !t) return null;
                     const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                     const bX = conn.waypoint ? conn.waypoint.x : (sX + tX) / 2, bY = conn.waypoint ? conn.waypoint.y : (sY + tY) / 2;
+                    const c = conn.color.includes('rose') ? 'bg-rose-500' : conn.color.includes('emerald') ? 'bg-emerald-500' : conn.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
                     return (
-                        <div key={`ball_${conn.id}`} className={`absolute w-4 h-4 bg-white rounded-full border-2 border-slate-300 flex items-center justify-center z-[20] cursor-pointer hover:scale-125 transition-transform shadow-sm pointer-events-auto`}
-                             style={{ left: bX - 8, top: bY - 8 }} onMouseDown={(e) => { e.stopPropagation(); setWireDragStart({ x: e.clientX, y: e.clientY }); setDraggingWireId(conn.id); }}>
-                            <div className={`w-2 h-2 rounded-full ${conn.color}`} />
+                        <div key={`ball_${conn.id}`} className={`absolute w-5 h-5 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] cursor-pointer hover:scale-125 transition-transform shadow-md pointer-events-auto`}
+                             style={{ left: bX - 10, top: bY - 10 }} onMouseDown={(e) => { e.stopPropagation(); setWireDragStart({ x: e.clientX, y: e.clientY }); setDraggingWireId(conn.id); }}>
+                            <div className={`w-2.5 h-2.5 rounded-full ${c} animate-pulse-subtle`} />
                         </div>
                     )
                 })}
+
+                {/* ENHANCED LATCH POINTS: High Visibility */}
+                {canvasItems.map(item => (
+                  <div key={`latch_group_${item.instanceId}`} className="absolute pointer-events-none z-[2000]" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                      {LATCH_POINTS.map(lp => {
+                        const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
+                        const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
+                        const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
+                        const isVisible = !!ghost || !!outgoingLink || !!incomingLink;
+                        const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : lp.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
+                        return (
+                          <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white cursor-pointer pointer-events-auto shadow-sm
+                                  ${outgoingLink || incomingLink ? c : 'bg-slate-300'}
+                                  ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
+                                  ${ghost ? 'ring-4 ring-slate-200 scale-150 animate-pulse' : ''}
+                                  hover:scale-150
+                              `} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} 
+                          />
+                        );
+                      })}
+                  </div>
+                ))}
             </div>
           </div>
         ) : (

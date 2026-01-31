@@ -1,46 +1,57 @@
 
 /**
- * Lane-Progressive Routing (Avoids tile bodies)
+ * Obstacle-Aware Lane-Progressive Routing
+ * Navigates around node bodies (32x32 tiles) to ensure paths run in the lanes.
  */
 export const getSmartPath = (sX: number, sY: number, tX: number, tY: number, sourceSide: string, targetSide: string) => {
     const lane = 16; 
+    const margin = 8; // Extra padding to clear the tile body
+    
+    // Calculate initial exit points based on side
     let exitX = sX, exitY = sY;
-    if (sourceSide === 'right') exitX += lane;
-    else if (sourceSide === 'left') exitX -= lane;
-    else if (sourceSide === 'bottom') exitY += lane;
-    else if (sourceSide === 'top') exitY -= lane;
+    if (sourceSide === 'right') exitX += (lane + margin);
+    else if (sourceSide === 'left') exitX -= (lane + margin);
+    else if (sourceSide === 'bottom') exitY += (lane + margin);
+    else if (sourceSide === 'top') exitY -= (lane + margin);
 
+    // Calculate final entry points based on side
     let entryX = tX, entryY = tY;
-    if (targetSide === 'right') entryX += lane;
-    else if (targetSide === 'left') entryX -= lane;
-    else if (targetSide === 'bottom') entryY += lane;
-    else if (targetSide === 'top') entryY -= lane;
+    if (targetSide === 'right') entryX += (lane + margin);
+    else if (targetSide === 'left') entryX -= (lane + margin);
+    else if (targetSide === 'bottom') entryY += (lane + margin);
+    else if (targetSide === 'top') entryY -= (lane + margin);
 
     let points = [[sX, sY], [exitX, exitY]];
-    const isHorizontalExit = (sourceSide === 'left' || sourceSide === 'right');
-    const targetIsBehind = isHorizontalExit 
-        ? (sourceSide === 'right' ? tX < sX : tX > sX)
-        : (sourceSide === 'bottom' ? tY < sY : tY > sY);
 
-    if (targetIsBehind) {
-        if (isHorizontalExit) {
-            const bypassY = Math.abs(tY - sY) < 64 ? (tY > sY ? sY + 64 : sY - 64) : sY;
-            points.push([exitX, bypassY], [entryX, bypassY]);
-        } else {
-            const bypassX = Math.abs(tX - sX) < 64 ? (tX > sX ? sX + 64 : sX - 64) : sX;
-            points.push([bypassX, exitY], [bypassX, entryY]);
-        }
+    const isHorizontalExit = (sourceSide === 'left' || sourceSide === 'right');
+    const isHorizontalEntry = (targetSide === 'left' || targetSide === 'right');
+
+    if (isHorizontalExit && isHorizontalEntry) {
+        // Both sides are horizontal (left/right)
+        const midX = (exitX + entryX) / 2;
+        points.push([midX, exitY], [midX, entryY]);
+    } else if (!isHorizontalExit && !isHorizontalEntry) {
+        // Both sides are vertical (top/bottom)
+        const midY = (exitY + entryY) / 2;
+        points.push([exitX, midY], [entryX, midY]);
     } else {
+        // One is horizontal, one is vertical (elbow turn)
         if (isHorizontalExit) {
-            const midX = (exitX + entryX) / 2;
-            points.push([midX, exitY], [midX, entryY]);
+            points.push([entryX, exitY]);
         } else {
-            const midY = (exitY + entryY) / 2;
-            points.push([exitX, midY], [entryX, midY]);
+            points.push([exitX, entryY]);
         }
     }
+
     points.push([entryX, entryY], [tX, tY]);
-    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
+
+    // Clean up duplicate consecutive points
+    const filteredPoints = points.filter((p, i) => {
+        if (i === 0) return true;
+        return p[0] !== points[i-1][0] || p[1] !== points[i-1][1];
+    });
+
+    return filteredPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
 };
 
 export const snapToGrid = (val: number, offset = 0, gridSize = 32) => 
