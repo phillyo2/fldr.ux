@@ -192,10 +192,11 @@ export default function App() {
     setIsDraggingDrawer(false);
     const start = offsetRef.current; 
     const startTime = performance.now();
-    const duration = 180;
+    const duration = 150; // Faster transition
     const step = (now: number) => {
       const p = Math.min((now - startTime) / duration, 1); 
-      const easedP = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+      // Quadratic easing out for a snappier feel
+      const easedP = p * (2 - p);
       setSimulatedOffset(start + (target - start) * easedP); 
       if (p < 1) requestAnimationFrame(step);
     };
