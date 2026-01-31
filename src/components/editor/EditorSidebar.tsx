@@ -1,9 +1,8 @@
-
 "use client";
 
 import React from 'react';
 import { NodeType, LogicNode } from '@/lib/types';
-import { Zap, Play, Box, Search, Plus, Trash2, Download, Code, Layers, Settings2 } from 'lucide-react';
+import { Zap, Play, Box, Search, Plus, Trash2, Download, Layers, Settings2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -18,7 +17,6 @@ interface SidebarProps {
   onUpdateNode: (nodeId: string, updates: Partial<LogicNode>) => void;
   onDeleteNode: (nodeId: string) => void;
   onExport: () => void;
-  onGenerate: () => void;
 }
 
 const nodeTemplates = [
@@ -37,8 +35,7 @@ export const EditorSidebar: React.FC<SidebarProps> = ({
   onAddNode,
   onUpdateNode,
   onDeleteNode,
-  onExport,
-  onGenerate
+  onExport
 }) => {
   return (
     <div className="w-80 border-r bg-sidebar h-full flex flex-col shrink-0">
@@ -141,10 +138,7 @@ export const EditorSidebar: React.FC<SidebarProps> = ({
         </TabsContent>
       </Tabs>
 
-      <div className="p-4 border-t bg-white mt-auto space-y-2">
-        <Button onClick={onGenerate} className="w-full bg-accent hover:bg-accent/90">
-          <Code className="w-4 h-4 mr-2" /> Generate JS Code
-        </Button>
+      <div className="p-4 border-t bg-white mt-auto">
         <Button variant="outline" onClick={onExport} className="w-full">
           <Download className="w-4 h-4 mr-2" /> Export Flow
         </Button>

@@ -1,11 +1,8 @@
-
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { LogicFlow, LogicNode, LogicConnection } from '@/lib/types';
+import React, { useState, useRef } from 'react';
+import { LogicFlow } from '@/lib/types';
 import { NodeElement } from './NodeElement';
-import { suggestNodeConnections } from '@/ai/flows/suggest-node-connections';
-import { toast } from '@/hooks/use-toast';
 
 interface CanvasProps {
   flow: LogicFlow;
@@ -59,36 +56,13 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
     });
   };
 
-  const handleCompleteConnection = async (targetNodeId: string, targetPortId: string, targetPortType: string) => {
+  const handleCompleteConnection = (targetNodeId: string, targetPortId: string) => {
     if (!activeConnection) return;
     
     // Self connection prevention
     if (activeConnection.sourceId === targetNodeId) {
       setActiveConnection(null);
       return;
-    }
-
-    // AI Check for smart suggestions
-    const sourceNode = flow.nodes.find(n => n.id === activeConnection.sourceId);
-    const targetNode = flow.nodes.find(n => n.id === targetNodeId);
-
-    if (sourceNode && targetNode) {
-      const suggestion = await suggestNodeConnections({
-        sourceNodeType: sourceNode.type,
-        targetNodeType: targetNode.type,
-        sourcePortType: activeConnection.portType,
-        targetPortType: targetPortType
-      });
-
-      if (!suggestion.isValidConnection) {
-        toast({
-          title: "Incompatible Connection",
-          description: suggestion.reason || "These nodes cannot be connected.",
-          variant: "destructive"
-        });
-        setActiveConnection(null);
-        return;
-      }
     }
 
     onConnect(activeConnection.sourceId, activeConnection.sourcePortId, targetNodeId, targetPortId);
