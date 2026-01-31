@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
@@ -142,40 +143,65 @@ export default function App() {
 
       const dx = (dragNode.x || 0) - other.x; const dy = (dragNode.y || 0) - other.y;
       const adx = Math.abs(dx); const ady = Math.abs(dy);
+      const isAdjacent = adx < (UNIT_SIZE_VAL + 5) && ady < (UNIT_SIZE_VAL + 5);
 
       let targetPort = null; let sourcePort = null;
-      if (adx < SNAP_TOLERANCE) { 
-          if (Math.abs(ady - UNIT_SIZE_VAL) < DETECTION_RANGE) {
-              if (dy > 0) { targetPort = 'bottom'; sourcePort = 'top'; } else { targetPort = 'top'; sourcePort = 'bottom'; }
+      
+      // GRID ADJACENCY LOGIC (Snap-to-Neighbor)
+      if (isAdjacent) {
+          if (adx < 5) { 
+              if (dy > 0) { // Drag node is below other
+                  targetPort = 'top'; sourcePort = 'bottom'; 
+              } else { // Drag node is above other
+                  targetPort = 'bottom'; sourcePort = 'top'; 
+              }
+          } else if (ady < 5) {
+              if (dx > 0) { // Drag node is to the right
+                  targetPort = 'left'; sourcePort = 'right'; 
+              } else { // Drag node is to the left
+                  targetPort = 'right'; sourcePort = 'left'; 
+              }
           }
-      } else if (ady < SNAP_TOLERANCE) {
-          if (Math.abs(adx - UNIT_SIZE_VAL) < DETECTION_RANGE) {
-              if (dx > 0) { targetPort = 'right'; sourcePort = 'left'; } else { targetPort = 'left'; sourcePort = 'right'; }
-          }
+      } 
+      // DISTAL TETHERING LOGIC (Always aim for Blue Input)
+      else if (adx < DETECTION_RANGE && ady < DETECTION_RANGE) {
+          targetPort = 'top'; // Target Blue Input
+          // Determine best source port on 'other' to reach dragNode
+          if (dy > adx) sourcePort = 'bottom';
+          else if (dx > ady) sourcePort = 'right';
+          else sourcePort = 'left';
       }
 
       if (targetPort && sourcePort) {
+          // RECURSION RULE: Only allow circling back to Blue (Top)
           const involvesLoop = isDescendantOf(other.instanceId, dId, connRef.current);
           if (involvesLoop && targetPort !== 'top') return;
-
-          const otherLp = LATCH_POINTS.find(lp => lp.id === targetPort);
-          if (!otherLp) return;
+          
+          // PREVENTION: Cannot connect to self (already handled by ID check)
+          
+          const sourceLp = LATCH_POINTS.find(lp => lp.id === sourcePort);
+          if (!sourceLp) return;
+          
           const snapX = other.x + (targetPort === 'right' ? 32 : (targetPort === 'left' ? -32 : 0));
           const snapY = other.y + (targetPort === 'bottom' ? 32 : (targetPort === 'top' ? -32 : 0));
+          
           ghosts.push({ 
             id: 'ghost',
-            sourceId: other.instanceId, sourceSide: targetPort, targetId: dId, targetSide: sourcePort,
-            color: otherLp.color, displayColor: 'bg-slate-300', snapX, snapY
+            sourceId: other.instanceId, sourceSide: sourcePort, targetId: dId, targetSide: targetPort,
+            color: sourceLp.color, displayColor: 'bg-slate-300', snapX, snapY
           });
       }
     });
 
     if (ghosts.length === 0) return [];
+    
+    // Nearest Point Rule: Return only the closest single ghost handshake
     ghosts.sort((a, b) => {
         const distA = Math.sqrt(Math.pow((a.snapX || 0) - (dragNode.x || 0), 2) + Math.pow((a.snapY || 0) - (dragNode.y || 0), 2));
         const distB = Math.sqrt(Math.pow((b.snapX || 0) - (dragNode.x || 0), 2) + Math.pow((b.snapY || 0) - (dragNode.y || 0), 2));
         return distA - distB;
     });
+    
     return [ghosts[0]];
   };
 
@@ -573,3 +599,4 @@ export default function App() {
     </div>
   );
 }
+
