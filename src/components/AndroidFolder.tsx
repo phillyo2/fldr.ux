@@ -60,7 +60,7 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
           height: '100%', 
           borderRadius: 0, 
           zIndex: 500,
-          transition: 'all 0.1s ease-out' // Ultra-fast transition
+          transition: 'all 0.08s ease-out' // Ultra-fast native speed
         } 
       : { 
           position: 'fixed', 
@@ -71,7 +71,7 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
           height: '48px', 
           borderRadius: '0.75rem', 
           zIndex: 100 - safeIndex,
-          transition: isDraggingDrawer ? 'none' : 'bottom 0.1s cubic-bezier(0, 0, 0.2, 1), transform 0.1s ease-out'
+          transition: isDraggingDrawer ? 'none' : 'bottom 0.1s cubic-bezier(0, 0, 0.2, 1), transform 0.08s ease-out'
         };
 
     return (

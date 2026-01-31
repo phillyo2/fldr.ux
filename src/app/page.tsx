@@ -192,7 +192,7 @@ export default function App() {
     setIsDraggingDrawer(false);
     const start = offsetRef.current; 
     const startTime = performance.now();
-    const duration = 100; // Super fast snapping
+    const duration = 60; // Lightning-fast snapping
     const step = (now: number) => {
       const p = Math.min((now - startTime) / duration, 1); 
       const easedP = p * (2 - p);
@@ -394,6 +394,11 @@ export default function App() {
     }
   };
 
+  const handleLauncherNavigate = (pageId: string) => {
+    setCurrentPageId(pageId);
+    setActiveFolderView(null);
+  };
+
   return (
     <div className="relative w-full h-screen bg-[#F8FAFC] overflow-hidden select-none font-sans">
       <nav className="fixed top-0 left-0 right-0 h-14 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-8 z-[60]">
@@ -418,7 +423,7 @@ export default function App() {
                       url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M16 12v8M12 16h8' stroke='%23cbd5e1' stroke-width='0.3' stroke-linecap='round'/%3E%3C/svg%3E")
                    `, 
                    backgroundSize: `32px 32px, 32px 32px`,
-                   backgroundPosition: `${viewOffset.x % 32}px ${viewOffset.y % 32}px, ${viewOffset.x % 32 + 16}px ${viewOffset.y % 32 + 16}px`,
+                   backgroundPosition: `${viewOffset.x % 32}px ${viewOffset.y % 32}px, ${viewOffset.x % 32}px ${viewOffset.y % 32}px`,
                    backgroundRepeat: 'repeat, repeat'
                }} 
             />
@@ -508,7 +513,7 @@ export default function App() {
       </div>
       
       <div className="pointer-events-auto">
-        <AndroidFolder isMain={true} activeView={activeFolderView} onOpen={setActiveFolderView} onLaunch={setCurrentPageId} registry={foldersRegistry} windowSize={windowSize} simulatedOffset={simulatedOffset} />
+        <AndroidFolder isMain={true} activeView={activeFolderView} onOpen={setActiveFolderView} onLaunch={handleLauncherNavigate} registry={foldersRegistry} windowSize={windowSize} simulatedOffset={simulatedOffset} />
         <div 
             className="fixed bottom-[40px] left-[40px] w-12 h-12 z-[100] cursor-pointer"
             onMouseDown={handleDrawerPointerDown}
