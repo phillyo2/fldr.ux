@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
@@ -353,9 +352,9 @@ export default function App() {
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         
-                        let d = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
+                        const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                         const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
-                        return <path key={conn.id} d={d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" className="drop-shadow-sm" />;
+                        return <path key={conn.id} d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" className="drop-shadow-sm" />;
                     })}
                     
                     {activeTether && (() => {
@@ -370,7 +369,7 @@ export default function App() {
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('blue') ? '#3B82F6' : '#FBBF24';
                         
                         const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
-                        return <path d={tetherPath} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
+                        return <path d={tetherPath.d} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
                     })()}
                 </svg>
 
@@ -396,7 +395,8 @@ export default function App() {
 
                     const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                    const midX = (sX + tX) / 2, midY = (sY + tY) / 2;
+                    
+                    const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                     const c = conn.color.includes('rose') ? 'bg-rose-500' : conn.color.includes('emerald') ? 'bg-emerald-500' : conn.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
                     return (
                         <div 
@@ -404,7 +404,7 @@ export default function App() {
                           onClick={(e) => deleteConnection(e, conn.id)}
                           onTouchStart={(e) => deleteConnection(e, conn.id)}
                           className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] shadow-md cursor-pointer pointer-events-auto hover:scale-125 transition-transform group`}
-                          style={{ left: midX - 8, top: midY - 8 }}>
+                          style={{ left: pathData.mid.x - 8, top: pathData.mid.y - 8 }}>
                             <div className={`w-2 h-2 rounded-full ${c} animate-pulse-subtle group-hover:hidden`} />
                             <X className="w-2 h-2 text-slate-400 hidden group-hover:block" />
                         </div>

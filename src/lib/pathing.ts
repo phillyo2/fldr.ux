@@ -1,6 +1,6 @@
 /**
  * GBTF Master Protocol: Manhattan Loom Routing Engine
- * Version: 6.1 [Industrial Schematic]
+ * Version: 6.2 [Industrial Schematic]
  */
 
 import { CanvasItem } from './types';
@@ -37,17 +37,15 @@ const getCenter = (coord: number) => {
 
 /**
  * Checks if a point is inside the bounding box of any tile (with buffer).
- * Now strictly checks all tiles to prevent clipping through source/target bodies.
  */
 const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], startPoint: Point, endPoint: Point) => {
-  // Always allow the start and end points
   if ((Math.abs(p.x - startPoint.x) < 2 && Math.abs(p.y - startPoint.y) < 2) ||
       (Math.abs(p.x - endPoint.x) < 2 && Math.abs(p.y - endPoint.y) < 2)) {
     return false;
   }
 
   for (const tile of tiles) {
-    const buffer = 2; // Minimal buffer for tight routing
+    const buffer = 2; 
     const left = tile.x - buffer;
     const right = tile.x + GRID_SIZE + buffer;
     const top = (tile.y - HEADER_OFFSET) - buffer;
@@ -63,11 +61,10 @@ const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], startPoint: Point,
 /**
  * Calculates lateral penalty for moving adjacent to its own history or other paths.
  */
-const getLateralPenalty = (neighbor: Point, history: Point[], globalOccupancy: Set<string>) => {
+const getLateralPenalty = (neighbor: Point, history: Point[]) => {
   let penalty = 0;
   const threshold = 1.1 * GRID_SIZE;
 
-  // 1. Self-lateral avoidance
   for (const point of history) {
     const dx = Math.abs(neighbor.x - point.x);
     const dy = Math.abs(neighbor.y - point.y);
@@ -75,19 +72,6 @@ const getLateralPenalty = (neighbor: Point, history: Point[], globalOccupancy: S
       penalty += LATERAL_PENALTY;
     }
   }
-
-  // 2. Global-lateral avoidance
-  const lateralOffsets = [
-    { x: GRID_SIZE, y: 0 }, { x: -GRID_SIZE, y: 0 },
-    { x: 0, y: GRID_SIZE }, { x: 0, y: -GRID_SIZE }
-  ];
-  for (const off of lateralOffsets) {
-    const key = `${neighbor.x + off.x},${neighbor.y + off.y}`;
-    if (globalOccupancy.has(key)) {
-      penalty += LATERAL_PENALTY;
-    }
-  }
-
   return penalty;
 };
 
@@ -123,6 +107,31 @@ const generateRoundedPath = (points: Point[]) => {
   return d;
 };
 
+/**
+ * Samples a point at a specific percentage along the path segments.
+ */
+const getPointAtProgress = (points: Point[], progress: number) => {
+  if (points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1) return points[0];
+
+  let totalLength = 0;
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const d = Math.sqrt(Math.pow(points[i+1].x - points[i].x, 2) + Math.pow(points[i+1].y - points[i].y, 2));
+    totalLength += d;
+    segments.push({ start: points[i], end: points[i+1], length: d, cumulative: totalLength });
+  }
+
+  const targetDist = totalLength * progress;
+  const segment = segments.find(s => s.cumulative >= targetDist) || segments[segments.length - 1];
+  
+  const segmentProgress = segment.length === 0 ? 0 : (targetDist - (segment.cumulative - segment.length)) / segment.length;
+  return {
+    x: segment.start.x + (segment.end.x - segment.start.x) * segmentProgress,
+    y: segment.start.y + (segment.end.y - segment.start.y) * segmentProgress
+  };
+};
+
 export const getSmartPath = (
   sX: number,
   sY: number,
@@ -132,20 +141,17 @@ export const getSmartPath = (
   targetSide: string,
   sourceId: string,
   targetId: string,
-  tiles: CanvasItem[],
-  globalOccupancy: Set<string> = new Set()
+  tiles: CanvasItem[]
 ) => {
   const startPoint = { x: sX, y: sY };
   const endPoint = { x: tX, y: tY };
 
-  // 1. Initial Normal / Projection (FAN-OUT)
   let startDir = { x: 0, y: 0 };
   if (sourceSide === 'right') startDir.x = 1;
   else if (sourceSide === 'left') startDir.x = -1;
   else if (sourceSide === 'bottom') startDir.y = 1;
   else if (sourceSide === 'top') startDir.y = -1;
 
-  // Project outward to escape tile face (Exactly one cell)
   let currentPos = startPoint;
   let forcedHistory: Point[] = [currentPos];
   
@@ -201,11 +207,9 @@ export const getSmartPath = (
 
       const nKey = `${neighbor.x},${neighbor.y}`;
       if (closedSet.has(nKey)) continue;
-
-      // RULE: Strictly avoid bodies of ALL tiles including source/target
       if (isInsideTileExclusion(neighbor, tiles, startPoint, endPoint)) continue;
 
-      const lateralPenalty = getLateralPenalty(neighbor, current.history, globalOccupancy);
+      const lateralPenalty = getLateralPenalty(neighbor, current.history);
       const turnPenalty = (current.direction && (d.x !== current.direction.x || d.y !== current.direction.y)) ? TURN_PENALTY : 0;
 
       const g = current.g + GRID_SIZE + lateralPenalty + turnPenalty;
@@ -223,5 +227,8 @@ export const getSmartPath = (
   }
 
   const finalPoints: Point[] = finalNode ? [...finalNode.history, target] : [startPoint, target];
-  return generateRoundedPath(finalPoints);
+  return {
+    d: generateRoundedPath(finalPoints),
+    mid: getPointAtProgress(finalPoints, 0.5)
+  };
 };
