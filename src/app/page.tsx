@@ -38,6 +38,7 @@ export default function App() {
   const [wireDragStart, setWireDragStart] = useState<{x: number, y: number} | null>(null);   
   const tetherTimer = useRef<NodeJS.Timeout | null>(null);
   const [simulatedOffset, setSimulatedOffset] = useState(0);
+  const [isDraggingDrawer, setIsDraggingDrawer] = useState(false);
 
   // Gesture State for Drawer
   const touchStartY = useRef<number | null>(null);
@@ -188,11 +189,15 @@ export default function App() {
   };
 
   const animateTo = (target: number) => {
+    setIsDraggingDrawer(false);
     const start = offsetRef.current; 
     const startTime = performance.now();
+    const duration = 250;
     const step = (now: number) => {
-      const p = Math.min((now - startTime) / 250, 1); 
-      setSimulatedOffset(start + (target - start) * (1 - Math.pow(1 - p, 3))); 
+      const p = Math.min((now - startTime) / duration, 1); 
+      // Cubic easing
+      const easedP = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+      setSimulatedOffset(start + (target - start) * easedP); 
       if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
@@ -299,8 +304,8 @@ export default function App() {
       setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
       if (draggingWireId) {
           setDraggingWireId(null);
-          const cX = 'clientX' in e ? e.clientX : e.changedTouches[0].clientX;
-          const cY = 'clientY' in e ? e.clientY : e.changedTouches[0].clientY;
+          const cX = 'clientX' in e ? e.clientX : (e as TouchEvent).changedTouches[0].clientX;
+          const cY = 'clientY' in e ? e.clientY : (e as TouchEvent).changedTouches[0].clientY;
           if (wireDragStart && Math.sqrt(Math.pow(cX - wireDragStart.x, 2) + Math.pow(cY - wireDragStart.y, 2)) < DRAG_THRESHOLD) setConnections(prev => prev.filter(c => c.id !== draggingWireId));
           setWireDragStart(null); return;
       }
@@ -336,8 +341,9 @@ export default function App() {
   const handleDrawerPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     touchStartY.current = clientY;
-    initialOffset.current = simulatedOffset;
+    initialOffset.current = offsetRef.current;
     dragDistance.current = 0;
+    setIsDraggingDrawer(true);
   };
 
   useEffect(() => {
@@ -346,7 +352,7 @@ export default function App() {
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
       const delta = touchStartY.current - clientY;
       dragDistance.current = Math.abs(delta);
-      const sensitivity = 200; // pixels to reach full expansion
+      const sensitivity = 180; // pixels to reach full expansion
       const nextOffset = Math.max(0, Math.min(1, initialOffset.current + delta / sensitivity));
       setSimulatedOffset(nextOffset);
     };
@@ -354,10 +360,11 @@ export default function App() {
     const handleUp = () => {
       if (touchStartY.current === null) return;
       touchStartY.current = null;
-      // Snap to nearest state if we actually dragged significantly
-      if (dragDistance.current > 10) {
-          if (offsetRef.current > 0.4) animateTo(1);
+      if (dragDistance.current > 15) {
+          if (offsetRef.current > 0.45) animateTo(1);
           else animateTo(0);
+      } else {
+        setIsDraggingDrawer(false);
       }
     };
 
@@ -510,7 +517,7 @@ export default function App() {
             onClick={toggleStack}
         >
             {['actions', 'triggers', 'logic'].map((f, i) => (
-                <AndroidFolder key={f} fId={f} index={i} registry={foldersRegistry} activeView={activeFolderView} onOpen={handleOpenFolder} onBirth={handleSmartBirth} windowSize={windowSize} simulatedOffset={simulatedOffset} isStackedItem />
+                <AndroidFolder key={f} fId={f} index={i} registry={foldersRegistry} activeView={activeFolderView} onOpen={handleOpenFolder} onBirth={handleSmartBirth} windowSize={windowSize} simulatedOffset={simulatedOffset} isStackedItem isDraggingDrawer={isDraggingDrawer} />
             ))}
         </div>
       </div>

@@ -19,6 +19,7 @@ interface AndroidFolderProps {
   windowSize: { w: number; h: number };
   simulatedOffset: number;
   isStackedItem?: boolean;
+  isDraggingDrawer?: boolean;
 }
 
 export const AndroidFolder: React.FC<AndroidFolderProps> = ({ 
@@ -32,7 +33,8 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
   onBirth, 
   windowSize, 
   simulatedOffset,
-  isStackedItem = false
+  isStackedItem = false,
+  isDraggingDrawer = false
 }) => {
     const data = isMain ? { icon: 'Zap', title: 'Launcher', color: 'bg-slate-900', items: [] } : (fId ? registry[fId] : null);
     if (!data) return null;
@@ -47,21 +49,21 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
     return (
       <div 
         style={isExpanded ? { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 0, zIndex: 500 } : { position: isStackedItem ? 'absolute' : 'fixed', top: `${c_top}px`, left: `${c_left}px`, width: '48px', height: '48px', borderRadius: '0.75rem', zIndex: 100 - index }} 
-        className={`shadow-2xl overflow-hidden transition-all duration-300 ${isExpanded ? 'bg-white/95 backdrop-blur-3xl' : `${data.color} cursor-pointer border-t border-white/20`} flex items-center justify-center text-white group`} 
+        className={`shadow-2xl overflow-hidden ${!isDraggingDrawer || isMain ? 'transition-all duration-300' : ''} ${isExpanded ? 'bg-white/95 backdrop-blur-3xl' : `${data.color} cursor-pointer border-t border-white/20`} flex items-center justify-center text-white group`} 
         onClick={(e) => { e.stopPropagation(); if (isExpanded) return; onOpen(isMain ? 'launcher' : (fId || null)); }}>
         
         {/* Chevron Handle - non-interactive visual hint */}
         {!isMain && !isExpanded && index === 0 && (
-            <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none flex flex-col items-center">
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none flex flex-col items-center">
                 {simulatedOffset < 0.5 ? (
                   <div className="animate-bounce flex flex-col items-center">
-                    <ChevronUp size={16} />
-                    <span className="text-[6px] font-bold uppercase tracking-widest -mt-1">Open</span>
+                    <ChevronUp size={20} className="stroke-[3]" />
+                    <span className="text-[7px] font-black uppercase tracking-[0.2em] -mt-1 bg-white/80 px-1 rounded shadow-sm border border-slate-100">Pull</span>
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center opacity-50">
-                    <ChevronDown size={16} />
-                    <span className="text-[6px] font-bold uppercase tracking-widest -mt-1">Close</span>
+                  <div className="flex flex-col items-center opacity-70">
+                    <ChevronDown size={20} className="stroke-[3]" />
+                    <span className="text-[7px] font-black uppercase tracking-[0.2em] -mt-1 bg-white/80 px-1 rounded shadow-sm border border-slate-100">Push</span>
                   </div>
                 )}
             </div>
@@ -83,8 +85,8 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
         </div>
 
         { !isMain && isExpanded && (
-             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 opacity-50" onClick={() => onOpen(null)}>
-                 <ChevronDown size={16}/>
+             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 opacity-50 cursor-pointer" onClick={() => onOpen(null)}>
+                 <ChevronDown size={24} className="stroke-[3]" />
              </div>
         )}
       </div>
