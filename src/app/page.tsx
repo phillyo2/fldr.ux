@@ -218,7 +218,6 @@ export default function App() {
     const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     setDragStartPos({ id: item.instanceId, x: clientX, y: clientY });
-    // Add visual offset to the starting mouse offset calculation
     mouseOffset.current = { x: clientX - item.x, y: clientY - item.y + DRAG_VISUAL_OFFSET };
     lastValidPos.current = { x: item.x, y: item.y };
     pressTimer.current = setTimeout(() => { setIsDragging(true); setDraggingId(item.instanceId); }, LONG_PRESS_MS);
@@ -269,7 +268,6 @@ export default function App() {
 
       if (!activeTether) {
           const best = ghosts[0] as any;
-          // Increased threshold for more forgiving handshakes
           if (best && best.dotDistance < 24) {
               if (!tetherTimer.current) {
                   tetherTimer.current = setTimeout(() => {
@@ -417,7 +415,7 @@ export default function App() {
                 {canvasItems.map(item => {
                   const involvesRecursion = draggingId && isDescendantOf(item.instanceId, draggingId, connRef.current);
                   return (
-                    <div key={`latch_group_${item.instanceId}`} className="absolute pointer-events-none z-[2000]" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                    <div key={`latch_group_${item.instanceId}`} className="absolute pointer-events-none" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.map(lp => {
                           const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
@@ -431,8 +429,11 @@ export default function App() {
                           
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : lp.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
                           
+                          const isParent = lp.type !== 'input';
+                          const zIndexClass = isParent ? 'z-[2001]' : 'z-[2000]';
+
                           return (
-                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm
+                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm ${zIndexClass}
                                     ${isConnected ? c : 'bg-slate-300'}
                                     ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
                                     ${ghost ? (isForbiddenRecursion ? 'bg-slate-400 opacity-50 grayscale' : 'ring-4 ring-slate-200 scale-150 animate-pulse') : ''}
