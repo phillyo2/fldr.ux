@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
@@ -241,6 +241,11 @@ export default function App() {
     }
   };
 
+  const deleteConnection = (e: React.MouseEvent, connId: string) => {
+    e.stopPropagation();
+    setConnections(prev => prev.filter(c => c.id !== connId));
+  };
+
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
@@ -401,9 +406,13 @@ export default function App() {
                     const midX = (sX + tX) / 2, midY = (sY + tY) / 2;
                     const c = conn.color.includes('rose') ? 'bg-rose-500' : conn.color.includes('emerald') ? 'bg-emerald-500' : conn.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
                     return (
-                        <div key={`ball_${conn.id}`} className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] shadow-md pointer-events-none`}
-                             style={{ left: midX - 8, top: midY - 8 }}>
-                            <div className={`w-2 h-2 rounded-full ${c} animate-pulse-subtle`} />
+                        <div 
+                          key={`ball_${conn.id}`} 
+                          onClick={(e) => deleteConnection(e, conn.id)}
+                          className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] shadow-md cursor-pointer hover:scale-125 transition-transform group`}
+                          style={{ left: midX - 8, top: midY - 8 }}>
+                            <div className={`w-2 h-2 rounded-full ${c} animate-pulse-subtle group-hover:hidden`} />
+                            <X className="w-2 h-2 text-slate-400 hidden group-hover:block" />
                         </div>
                     )
                 })}
@@ -482,4 +491,3 @@ export default function App() {
     </div>
   );
 }
-
