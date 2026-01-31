@@ -39,6 +39,10 @@ export default function App() {
   const tetherTimer = useRef<NodeJS.Timeout | null>(null);
   const [simulatedOffset, setSimulatedOffset] = useState(0);
 
+  // Gesture State for Drawer
+  const touchStartY = useRef<number | null>(null);
+  const initialOffset = useRef<number>(0);
+
   const [foldersRegistry, setFoldersRegistry] = useState<Record<string, FolderData>>({
     'actions': { id: 'actions', title: 'Actions', icon: 'Zap', color: 'bg-blue-600', items: [
         { name: 'New Action', icon: 'Plus', isBuilder: true },
@@ -204,12 +208,6 @@ export default function App() {
     setIsStudioOpen(false); setEditingItem(null);
   };
 
-  const finalizeDeployment = () => {
-    if (!editingItem) return;
-    setCanvasItems(prev => prev.map(i => i.instanceId === editingItem.instanceId ? { ...i, deployedData: deploymentValues } : i));
-    setIsDeploymentOpen(false); setEditingItem(null);
-  };
-
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
     const now = Date.now();
     if (now - lastTap.current < 300) {
@@ -324,9 +322,54 @@ export default function App() {
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
   }, [isDragging, isPanning, draggingId, activeTether, draggingWireId, dragStartPos, viewOffset, wireDragStart]); 
 
+  // --- DRAWER GESTURES ---
+  const handleDrawerPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
+    touchStartY.current = clientY;
+    initialOffset.current = simulatedOffset;
+  };
+
+  useEffect(() => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      if (touchStartY.current === null) return;
+      const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
+      const delta = touchStartY.current - clientY;
+      const sensitivity = 150; // pixels to reach full expansion
+      const nextOffset = Math.max(0, Math.min(1, initialOffset.current + delta / sensitivity));
+      setSimulatedOffset(nextOffset);
+    };
+
+    const handleUp = () => {
+      if (touchStartY.current === null) return;
+      touchStartY.current = null;
+      // Snap to nearest state
+      if (simulatedOffset > 0.3) animateTo(1);
+      else animateTo(0);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchmove', handleMove);
+    window.addEventListener('touchend', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleUp);
+    };
+  }, [simulatedOffset]);
+
   const handleOpenFolder = (fId: string) => {
-    if (simulatedOffset < 0.8) animateTo(1); 
-    setActiveFolderView(fId);
+    if (simulatedOffset < 0.8) {
+        animateTo(1);
+    } else {
+        setActiveFolderView(fId);
+    }
+  };
+
+  const toggleStack = () => {
+    if (simulatedOffset > 0.5) animateTo(0);
+    else animateTo(1);
   };
 
   return (
@@ -444,9 +487,16 @@ export default function App() {
       
       <div className="pointer-events-auto">
         <AndroidFolder isMain={true} activeView={activeFolderView} onOpen={setActiveFolderView} onLaunch={setCurrentPageId} registry={foldersRegistry} windowSize={windowSize} simulatedOffset={simulatedOffset} />
-        {['actions', 'triggers', 'logic'].map((f, i) => (
-            <AndroidFolder key={f} fId={f} index={i} registry={foldersRegistry} activeView={activeFolderView} onOpen={handleOpenFolder} onBirth={handleSmartBirth} windowSize={windowSize} simulatedOffset={simulatedOffset} />
-        ))}
+        <div 
+            className="fixed bottom-[40px] left-[40px] w-12 h-12 z-[100] cursor-pointer"
+            onMouseDown={handleDrawerPointerDown}
+            onTouchStart={handleDrawerPointerDown}
+            onClick={toggleStack}
+        >
+            {['actions', 'triggers', 'logic'].map((f, i) => (
+                <AndroidFolder key={f} fId={f} index={i} registry={foldersRegistry} activeView={activeFolderView} onOpen={handleOpenFolder} onBirth={handleSmartBirth} windowSize={windowSize} simulatedOffset={simulatedOffset} isStackedItem />
+            ))}
+        </div>
       </div>
 
       {isStudioOpen && (
