@@ -1,14 +1,14 @@
 /**
- * GBTF Master Protocol: A* Manhattan Routing Engine
- * Version: 5.0 [Industrial Loom]
+ * GBTF Master Protocol: Manhattan Loom Routing Engine
+ * Version: 6.0 [Industrial Schematic]
  */
 
-import { CanvasItem, Connection } from './types';
+import { CanvasItem } from './types';
 
 const GRID_SIZE = 32;
-const TILE_EXCLUSION_PENALTY = 1000000;
-const PROXIMITY_PENALTY = 50;
-const TURN_PENALTY = 10;
+const TILE_PENALTY = 1000000;
+const LATERAL_PENALTY = 2000;
+const TURN_PENALTY = 50;
 const FAN_OUT_DISTANCE = 2;
 
 export const snapToGrid = (val: number, offset = 0, gridSize = GRID_SIZE) =>
@@ -23,25 +23,26 @@ interface AStarNode extends Point {
   g: number;
   f: number;
   parent: AStarNode | null;
-  direction: string | null;
+  direction: Point | null;
+  history: Point[];
 }
 
 /**
- * Calculates the Manhattan distance between two points
+ * Snaps a coordinate to the center of the nearest grid cell.
  */
-const getHeuristic = (a: Point, b: Point) => {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+const getCenter = (coord: number) => {
+  return Math.floor(coord / GRID_SIZE) * GRID_SIZE + (GRID_SIZE / 2);
 };
 
 /**
- * Checks if a point is within a tile's exclusion zone (tile + 1 grid unit buffer)
+ * Checks if a point is inside the bounding box of any tile (with buffer).
  */
-const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], targetId: string, sourceId: string) => {
+const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], sourceId: string, targetId: string) => {
   for (const tile of tiles) {
-    // We allow the path to be at the connection points of the source and target tiles
+    // We allow the path to enter/exit the source and target tiles
     if (tile.instanceId === sourceId || tile.instanceId === targetId) continue;
 
-    const buffer = GRID_SIZE;
+    const buffer = 4; // Minimal buffer to allow tight routing but no overlap
     const left = tile.x - buffer;
     const right = tile.x + GRID_SIZE + buffer;
     const top = tile.y - buffer;
@@ -55,7 +56,39 @@ const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], targetId: string, 
 };
 
 /**
- * Generates the SVG path string from A* results with rounded corners
+ * Calculates lateral penalty for moving adjacent to its own history or other paths.
+ * Prevents "hugging" and parallel line tangling.
+ */
+const getLateralPenalty = (neighbor: Point, history: Point[], globalOccupancy: Set<string>) => {
+  let penalty = 0;
+  const threshold = 1.1 * GRID_SIZE; // Captures adjacent parallel cells
+
+  // 1. Self-lateral avoidance
+  for (const point of history) {
+    const dx = Math.abs(neighbor.x - point.x);
+    const dy = Math.abs(neighbor.y - point.y);
+    if (dx <= threshold && dy <= threshold && (dx > 0 || dy > 0)) {
+      penalty += LATERAL_PENALTY;
+    }
+  }
+
+  // 2. Global-lateral avoidance (Don't hug other lines)
+  const lateralOffsets = [
+    { x: GRID_SIZE, y: 0 }, { x: -GRID_SIZE, y: 0 },
+    { x: 0, y: GRID_SIZE }, { x: 0, y: -GRID_SIZE }
+  ];
+  for (const off of lateralOffsets) {
+    const key = `${neighbor.x + off.x},${neighbor.y + off.y}`;
+    if (globalOccupancy.has(key)) {
+      penalty += LATERAL_PENALTY;
+    }
+  }
+
+  return penalty;
+};
+
+/**
+ * Generates the SVG path string from points with rounded corners.
  */
 const generateRoundedPath = (points: Point[]) => {
   if (points.length < 2) return '';
@@ -98,118 +131,94 @@ export const getSmartPath = (
   tiles: CanvasItem[],
   globalOccupancy: Set<string> = new Set()
 ) => {
-  // 1. FAN-OUT: Initialize start position and force movement away from tile
-  let startPoints: Point[] = [{ x: sX, y: sY }];
+  // 1. Initial Normal / Projection (FAN-OUT)
+  let startDir = { x: 0, y: 0 };
+  if (sourceSide === 'right') startDir.x = 1;
+  else if (sourceSide === 'left') startDir.x = -1;
+  else if (sourceSide === 'bottom') startDir.y = 1;
+  else if (sourceSide === 'top') startDir.y = -1;
+
+  // Project outward to escape tile face
   let currentPos = { x: sX, y: sY };
-  let exitVector = { x: 0, y: 0 };
-
-  if (sourceSide === 'right') exitVector.x = GRID_SIZE;
-  else if (sourceSide === 'left') exitVector.x = -GRID_SIZE;
-  else if (sourceSide === 'bottom') exitVector.y = GRID_SIZE;
-  else if (sourceSide === 'top') exitVector.y = -GRID_SIZE;
-
+  let forcedHistory: Point[] = [currentPos];
+  
   for (let i = 0; i < FAN_OUT_DISTANCE; i++) {
-    currentPos = { x: currentPos.x + exitVector.x, y: currentPos.y + exitVector.y };
-    startPoints.push({ ...currentPos });
+    currentPos = {
+      x: getCenter(currentPos.x + startDir.x * GRID_SIZE),
+      y: getCenter(currentPos.y + startDir.y * GRID_SIZE)
+    };
+    forcedHistory.push(currentPos);
   }
 
-  // 2. A* SEARCH
   const target = { x: tX, y: tY };
-  const openList: AStarNode[] = [
-    {
-      ...currentPos,
-      g: 0,
-      f: getHeuristic(currentPos, target),
-      parent: null,
-      direction: sourceSide,
-    },
-  ];
-  const closedList = new Set<string>();
+  const openSet: AStarNode[] = [{
+    ...currentPos,
+    g: 0,
+    f: Math.abs(currentPos.x - target.x) + Math.abs(currentPos.y - target.y),
+    parent: null,
+    direction: startDir,
+    history: forcedHistory
+  }];
+  const closedSet = new Set<string>();
 
   let finalNode: AStarNode | null = null;
   let iterations = 0;
-  const MAX_ITERATIONS = 500; // Safety break
+  const MAX_ITERATIONS = 500;
 
-  while (openList.length > 0 && iterations < MAX_ITERATIONS) {
+  while (openSet.length > 0 && iterations < MAX_ITERATIONS) {
     iterations++;
-    // Sort by f score (lowest first)
-    openList.sort((a, b) => a.f - b.f);
-    const current = openList.shift()!;
+    openSet.sort((a, b) => a.f - b.f);
+    const current = openSet.shift()!;
     const key = `${current.x},${current.y}`;
 
-    if (Math.abs(current.x - target.x) < 5 && Math.abs(current.y - target.y) < 5) {
+    if (Math.abs(current.x - target.x) < GRID_SIZE && Math.abs(current.y - target.y) < GRID_SIZE) {
       finalNode = current;
       break;
     }
 
-    closedList.add(key);
+    if (closedSet.has(key)) continue;
+    closedSet.add(key);
 
-    const neighbors = [
-      { x: current.x + GRID_SIZE, y: current.y, dir: 'right' },
-      { x: current.x - GRID_SIZE, y: current.y, dir: 'left' },
-      { x: current.x, y: current.y + GRID_SIZE, dir: 'bottom' },
-      { x: current.x, y: current.y - GRID_SIZE, dir: 'top' },
+    const directions = [
+      { x: 1, y: 0 }, { x: -1, y: 0 },
+      { x: 0, y: 1 }, { x: 0, y: -1 }
     ];
 
-    for (const neighbor of neighbors) {
-      if (closedList.has(`${neighbor.x},${neighbor.y}`)) continue;
+    for (const d of directions) {
+      // RULE: No 180-degree U-turns
+      if (current.direction && d.x === -current.direction.x && d.y === -current.direction.y) continue;
 
-      let moveCost = GRID_SIZE;
+      const neighbor = {
+        x: current.x + d.x * GRID_SIZE,
+        y: current.y + d.y * GRID_SIZE
+      };
 
-      // RULE: Exclusion Zones
-      if (isInsideTileExclusion(neighbor, tiles, targetId, sourceId)) {
-        moveCost += TILE_EXCLUSION_PENALTY;
-      }
+      const nKey = `${neighbor.x},${neighbor.y}`;
+      if (closedSet.has(nKey)) continue;
 
-      // RULE: Proximity Penalty (Avoid other paths)
-      const isNearOtherPath = 
-        globalOccupancy.has(`${neighbor.x + GRID_SIZE},${neighbor.y}`) ||
-        globalOccupancy.has(`${neighbor.x - GRID_SIZE},${neighbor.y}`) ||
-        globalOccupancy.has(`${neighbor.x},${neighbor.y + GRID_SIZE}`) ||
-        globalOccupancy.has(`${neighbor.x},${neighbor.y - GRID_SIZE}`);
+      // RULE: Avoid Bounding Box of tiles (Exclusion Zone)
+      if (isInsideTileExclusion(neighbor, tiles, sourceId, targetId)) continue;
+
+      // RULE: Avoid borders of itself and other paths (Lateral Penalty)
+      const lateralPenalty = getLateralPenalty(neighbor, current.history, globalOccupancy);
       
-      if (isNearOtherPath) {
-        moveCost += PROXIMITY_PENALTY;
-      }
+      // RULE: Turn Penalty to favor straight lines
+      const turnPenalty = (current.direction && (d.x !== current.direction.x || d.y !== current.direction.y)) ? TURN_PENALTY : 0;
 
-      // RULE: Turn Penalty
-      if (current.direction && current.direction !== neighbor.dir) {
-        moveCost += TURN_PENALTY;
-      }
+      const g = current.g + GRID_SIZE + lateralPenalty + turnPenalty;
+      const h = Math.abs(neighbor.x - target.x) + Math.abs(neighbor.y - target.y);
 
-      const g = current.g + moveCost;
-      const h = getHeuristic(neighbor, target);
-      const f = g + h;
-
-      const existingInOpen = openList.find(n => n.x === neighbor.x && n.y === neighbor.y);
-      if (existingInOpen && existingInOpen.g <= g) continue;
-
-      if (!existingInOpen) {
-        openList.push({ ...neighbor, g, f, parent: current, direction: neighbor.dir });
-      } else {
-        existingInOpen.g = g;
-        existingInOpen.f = f;
-        existingInOpen.parent = current;
-        existingInOpen.direction = neighbor.dir;
-      }
+      openSet.push({
+        ...neighbor,
+        g,
+        f: g + h,
+        parent: current,
+        direction: d,
+        history: [...current.history, neighbor]
+      });
     }
   }
 
-  // 3. RECONSTRUCT PATH
-  const points: Point[] = [];
-  let curr: AStarNode | null = finalNode;
-  while (curr) {
-    points.unshift({ x: curr.x, y: curr.y });
-    curr = curr.parent;
-  }
-
-  // Combine Fan-out with A* path
-  const finalPoints = [...startPoints.slice(0, -1), ...points];
-  
-  // Add target point if Iteration limit hit early
-  if (finalPoints[finalPoints.length - 1].x !== tX || finalPoints[finalPoints.length - 1].y !== tY) {
-    finalPoints.push({ x: tX, y: tY });
-  }
-
+  const finalPoints: Point[] = finalNode ? [...finalNode.history, target] : [{ x: sX, y: sY }, target];
   return generateRoundedPath(finalPoints);
 };
