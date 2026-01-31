@@ -163,7 +163,7 @@ export default function App() {
           const snapX = other.x + (targetPort === 'right' ? 32 : (targetPort === 'left' ? -32 : 0));
           const snapY = other.y + (targetPort === 'bottom' ? 32 : (targetPort === 'top' ? -32 : 0));
           ghosts.push({ 
-            id: '',
+            id: 'ghost',
             sourceId: other.instanceId, sourceSide: targetPort, targetId: dId, targetSide: sourcePort,
             color: otherLp.color, displayColor: 'bg-slate-300', snapX, snapY
           });
@@ -450,12 +450,12 @@ export default function App() {
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         
-                        // Collision-Aware Pathing
+                        // Kinematic Routing Logic
                         let d = conn.waypoint 
                             ? `M ${sX} ${sY} L ${conn.waypoint.x} ${sY} L ${conn.waypoint.x} ${conn.waypoint.y} L ${tX} ${conn.waypoint.y} L ${tX} ${tY}` 
-                            : getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide);
+                            : getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.id);
                             
-                        return <path key={conn.id} d={d} stroke={`url(#grad-${conn.id})`} strokeWidth="3.5" fill="none" strokeLinecap="round" className="drop-shadow-sm transition-all duration-300" />;
+                        return <path key={conn.id} d={d} stroke={`url(#grad-${conn.id})`} strokeWidth="3.5" fill="none" strokeLinecap="round" className="drop-shadow-sm transition-all duration-75" />;
                     })}
                     
                     {activeTether && (() => {
@@ -464,7 +464,10 @@ export default function App() {
                         const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + 16, tY = t.y - HEADER_OFFSET + 16;
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('blue') ? '#3B82F6' : '#FBBF24';
-                        return <path d={getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, 'top')} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
+                        
+                        // Tether uses same kinematic path logic
+                        const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, 'top', 'tether');
+                        return <path d={tetherPath} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
                     })()}
                 </svg>
 
