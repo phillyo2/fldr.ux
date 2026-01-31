@@ -1,6 +1,6 @@
 /**
  * GBTF Master Protocol: Manhattan Loom Routing Engine
- * Version: 6.0 [Industrial Schematic]
+ * Version: 6.1 [Industrial Schematic]
  */
 
 import { CanvasItem } from './types';
@@ -9,7 +9,8 @@ const GRID_SIZE = 32;
 const TILE_PENALTY = 1000000;
 const LATERAL_PENALTY = 2000;
 const TURN_PENALTY = 50;
-const FAN_OUT_DISTANCE = 2;
+const FAN_OUT_DISTANCE = 1; // Projection is exactly one cell block
+const HEADER_OFFSET = 56;
 
 export const snapToGrid = (val: number, offset = 0, gridSize = GRID_SIZE) =>
   Math.round((val - offset) / gridSize) * gridSize + offset;
@@ -36,17 +37,21 @@ const getCenter = (coord: number) => {
 
 /**
  * Checks if a point is inside the bounding box of any tile (with buffer).
+ * Now strictly checks all tiles to prevent clipping through source/target bodies.
  */
-const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], sourceId: string, targetId: string) => {
-  for (const tile of tiles) {
-    // We allow the path to enter/exit the source and target tiles
-    if (tile.instanceId === sourceId || tile.instanceId === targetId) continue;
+const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], startPoint: Point, endPoint: Point) => {
+  // Always allow the start and end points
+  if ((Math.abs(p.x - startPoint.x) < 2 && Math.abs(p.y - startPoint.y) < 2) ||
+      (Math.abs(p.x - endPoint.x) < 2 && Math.abs(p.y - endPoint.y) < 2)) {
+    return false;
+  }
 
-    const buffer = 4; // Minimal buffer to allow tight routing but no overlap
+  for (const tile of tiles) {
+    const buffer = 2; // Minimal buffer for tight routing
     const left = tile.x - buffer;
     const right = tile.x + GRID_SIZE + buffer;
-    const top = tile.y - buffer;
-    const bottom = tile.y + GRID_SIZE + buffer;
+    const top = (tile.y - HEADER_OFFSET) - buffer;
+    const bottom = (tile.y - HEADER_OFFSET) + GRID_SIZE + buffer;
 
     if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) {
       return true;
@@ -57,11 +62,10 @@ const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], sourceId: string, 
 
 /**
  * Calculates lateral penalty for moving adjacent to its own history or other paths.
- * Prevents "hugging" and parallel line tangling.
  */
 const getLateralPenalty = (neighbor: Point, history: Point[], globalOccupancy: Set<string>) => {
   let penalty = 0;
-  const threshold = 1.1 * GRID_SIZE; // Captures adjacent parallel cells
+  const threshold = 1.1 * GRID_SIZE;
 
   // 1. Self-lateral avoidance
   for (const point of history) {
@@ -72,7 +76,7 @@ const getLateralPenalty = (neighbor: Point, history: Point[], globalOccupancy: S
     }
   }
 
-  // 2. Global-lateral avoidance (Don't hug other lines)
+  // 2. Global-lateral avoidance
   const lateralOffsets = [
     { x: GRID_SIZE, y: 0 }, { x: -GRID_SIZE, y: 0 },
     { x: 0, y: GRID_SIZE }, { x: 0, y: -GRID_SIZE }
@@ -131,6 +135,9 @@ export const getSmartPath = (
   tiles: CanvasItem[],
   globalOccupancy: Set<string> = new Set()
 ) => {
+  const startPoint = { x: sX, y: sY };
+  const endPoint = { x: tX, y: tY };
+
   // 1. Initial Normal / Projection (FAN-OUT)
   let startDir = { x: 0, y: 0 };
   if (sourceSide === 'right') startDir.x = 1;
@@ -138,8 +145,8 @@ export const getSmartPath = (
   else if (sourceSide === 'bottom') startDir.y = 1;
   else if (sourceSide === 'top') startDir.y = -1;
 
-  // Project outward to escape tile face
-  let currentPos = { x: sX, y: sY };
+  // Project outward to escape tile face (Exactly one cell)
+  let currentPos = startPoint;
   let forcedHistory: Point[] = [currentPos];
   
   for (let i = 0; i < FAN_OUT_DISTANCE; i++) {
@@ -150,7 +157,7 @@ export const getSmartPath = (
     forcedHistory.push(currentPos);
   }
 
-  const target = { x: tX, y: tY };
+  const target = endPoint;
   const openSet: AStarNode[] = [{
     ...currentPos,
     g: 0,
@@ -163,7 +170,7 @@ export const getSmartPath = (
 
   let finalNode: AStarNode | null = null;
   let iterations = 0;
-  const MAX_ITERATIONS = 500;
+  const MAX_ITERATIONS = 600;
 
   while (openSet.length > 0 && iterations < MAX_ITERATIONS) {
     iterations++;
@@ -185,7 +192,6 @@ export const getSmartPath = (
     ];
 
     for (const d of directions) {
-      // RULE: No 180-degree U-turns
       if (current.direction && d.x === -current.direction.x && d.y === -current.direction.y) continue;
 
       const neighbor = {
@@ -196,13 +202,10 @@ export const getSmartPath = (
       const nKey = `${neighbor.x},${neighbor.y}`;
       if (closedSet.has(nKey)) continue;
 
-      // RULE: Avoid Bounding Box of tiles (Exclusion Zone)
-      if (isInsideTileExclusion(neighbor, tiles, sourceId, targetId)) continue;
+      // RULE: Strictly avoid bodies of ALL tiles including source/target
+      if (isInsideTileExclusion(neighbor, tiles, startPoint, endPoint)) continue;
 
-      // RULE: Avoid borders of itself and other paths (Lateral Penalty)
       const lateralPenalty = getLateralPenalty(neighbor, current.history, globalOccupancy);
-      
-      // RULE: Turn Penalty to favor straight lines
       const turnPenalty = (current.direction && (d.x !== current.direction.x || d.y !== current.direction.y)) ? TURN_PENALTY : 0;
 
       const g = current.g + GRID_SIZE + lateralPenalty + turnPenalty;
@@ -219,6 +222,6 @@ export const getSmartPath = (
     }
   }
 
-  const finalPoints: Point[] = finalNode ? [...finalNode.history, target] : [{ x: sX, y: sY }, target];
+  const finalPoints: Point[] = finalNode ? [...finalNode.history, target] : [startPoint, target];
   return generateRoundedPath(finalPoints);
 };
