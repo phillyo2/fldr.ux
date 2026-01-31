@@ -192,7 +192,7 @@ export default function App() {
     setIsDraggingDrawer(false);
     const start = offsetRef.current; 
     const startTime = performance.now();
-    const duration = 80; // High speed snapping
+    const duration = 60; // Lightning fast snap
     const step = (now: number) => {
       const p = Math.min((now - startTime) / duration, 1); 
       const easedP = p * (2 - p);
@@ -397,6 +397,7 @@ export default function App() {
   const handleLauncherNavigate = (pageId: string) => {
     setCurrentPageId(pageId);
     setActiveFolderView(null);
+    setSimulatedOffset(0); // Auto-collapse
   };
 
   return (
@@ -416,7 +417,7 @@ export default function App() {
              onContextMenu={(e) => e.preventDefault()}
              style={{ touchAction: 'none' }}>
             
-            {/* ENHANCED GRID: Lanes shifted 16, 16 */}
+            {/* ENHANCED GRID: Lanes shifted 16, 16 to align with pathing lanes */}
             <div className="absolute inset-0 pointer-events-none opacity-100" 
                style={{ 
                    backgroundImage: `
@@ -449,7 +450,12 @@ export default function App() {
                         if(!s || !t) return null;
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                        let d = conn.waypoint ? `M ${sX} ${sY} L ${conn.waypoint.x} ${sY} L ${conn.waypoint.x} ${conn.waypoint.y} L ${tX} ${conn.waypoint.y} L ${tX} ${tY}` : getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide);
+                        
+                        // Collision-Aware Pathing
+                        let d = conn.waypoint 
+                            ? `M ${sX} ${sY} L ${conn.waypoint.x} ${sY} L ${conn.waypoint.x} ${conn.waypoint.y} L ${tX} ${conn.waypoint.y} L ${tX} ${tY}` 
+                            : getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide);
+                            
                         return <path key={conn.id} d={d} stroke={`url(#grad-${conn.id})`} strokeWidth="3.5" fill="none" strokeLinecap="round" className="drop-shadow-sm transition-all duration-300" />;
                     })}
                     
@@ -477,23 +483,23 @@ export default function App() {
                   </div>
                 ))}
 
-                {/* ENHANCED TOUCH DOTS on Connections */}
+                {/* Mid-point segments balls */}
                 {connections.map(conn => {
                     const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                     if(!s || !t) return null;
                     const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                    const bX = conn.waypoint ? conn.waypoint.x : (sX + tX) / 2, bY = conn.waypoint ? conn.waypoint.y : (sY + tY) / 2;
+                    const midX = conn.waypoint ? conn.waypoint.x : (sX + tX) / 2, midY = conn.waypoint ? conn.waypoint.y : (sY + tY) / 2;
                     const c = conn.color.includes('rose') ? 'bg-rose-500' : conn.color.includes('emerald') ? 'bg-emerald-500' : conn.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
                     return (
-                        <div key={`ball_${conn.id}`} className={`absolute w-5 h-5 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] cursor-pointer hover:scale-125 transition-transform shadow-md pointer-events-auto`}
-                             style={{ left: bX - 10, top: bY - 10 }} onMouseDown={(e) => { e.stopPropagation(); setWireDragStart({ x: e.clientX, y: e.clientY }); setDraggingWireId(conn.id); }}>
-                            <div className={`w-2.5 h-2.5 rounded-full ${c} animate-pulse-subtle`} />
+                        <div key={`ball_${conn.id}`} className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] cursor-pointer hover:scale-125 transition-transform shadow-md pointer-events-auto`}
+                             style={{ left: midX - 8, top: midY - 8 }} onMouseDown={(e) => { e.stopPropagation(); setWireDragStart({ x: e.clientX, y: e.clientY }); setDraggingWireId(conn.id); }}>
+                            <div className={`w-2 h-2 rounded-full ${c} animate-pulse-subtle`} />
                         </div>
                     )
                 })}
 
-                {/* ENHANCED LATCH POINTS: High Visibility */}
+                {/* Latch points */}
                 {canvasItems.map(item => (
                   <div key={`latch_group_${item.instanceId}`} className="absolute pointer-events-none z-[2000]" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                       {LATCH_POINTS.map(lp => {
@@ -565,3 +571,4 @@ export default function App() {
     </div>
   );
 }
+

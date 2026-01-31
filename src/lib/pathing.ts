@@ -2,50 +2,51 @@
 /**
  * Obstacle-Aware Lane-Progressive Routing
  * Navigates around node bodies (32x32 tiles) to ensure paths run in the lanes.
+ * Specifically handles recursion by calculating clear exit/entry vectors.
  */
 export const getSmartPath = (sX: number, sY: number, tX: number, tY: number, sourceSide: string, targetSide: string) => {
-    const lane = 16; 
-    const margin = 8; // Extra padding to clear the tile body
+    const clearance = 24; // Ensure we clear the 32x32 body (16px radius + 8px buffer)
     
-    // Calculate initial exit points based on side
-    let exitX = sX, exitY = sY;
-    if (sourceSide === 'right') exitX += (lane + margin);
-    else if (sourceSide === 'left') exitX -= (lane + margin);
-    else if (sourceSide === 'bottom') exitY += (lane + margin);
-    else if (sourceSide === 'top') exitY -= (lane + margin);
+    // 1. Calculate Exit Point (Away from source node)
+    let p1X = sX, p1Y = sY;
+    if (sourceSide === 'right') p1X += clearance;
+    else if (sourceSide === 'left') p1X -= clearance;
+    else if (sourceSide === 'bottom') p1Y += clearance;
+    else if (sourceSide === 'top') p1Y -= clearance;
 
-    // Calculate final entry points based on side
-    let entryX = tX, entryY = tY;
-    if (targetSide === 'right') entryX += (lane + margin);
-    else if (targetSide === 'left') entryX -= (lane + margin);
-    else if (targetSide === 'bottom') entryY += (lane + margin);
-    else if (targetSide === 'top') entryY -= (lane + margin);
+    // 2. Calculate Entry Point (Approaching target node)
+    let p4X = tX, p4Y = tY;
+    if (targetSide === 'right') p4X += clearance;
+    else if (targetSide === 'left') p4X -= clearance;
+    else if (targetSide === 'bottom') p4Y += clearance;
+    else if (targetSide === 'top') p4Y -= clearance;
 
-    let points = [[sX, sY], [exitX, exitY]];
+    let points = [[sX, sY], [p1X, p1Y]];
 
-    const isHorizontalExit = (sourceSide === 'left' || sourceSide === 'right');
-    const isHorizontalEntry = (targetSide === 'left' || targetSide === 'right');
+    const isSrcHoriz = (sourceSide === 'left' || sourceSide === 'right');
+    const isTgtHoriz = (targetSide === 'left' || targetSide === 'right');
 
-    if (isHorizontalExit && isHorizontalEntry) {
-        // Both sides are horizontal (left/right)
-        const midX = (exitX + entryX) / 2;
-        points.push([midX, exitY], [midX, entryY]);
-    } else if (!isHorizontalExit && !isHorizontalEntry) {
-        // Both sides are vertical (top/bottom)
-        const midY = (exitY + entryY) / 2;
-        points.push([exitX, midY], [entryX, midY]);
+    // 3. Calculate Midpoints
+    if (isSrcHoriz && isTgtHoriz) {
+        // Both sides are horizontal (left/right) - Use a vertical mid-segment
+        const midX = (p1X + p4X) / 2;
+        points.push([midX, p1Y], [midX, p4Y]);
+    } else if (!isSrcHoriz && !isTgtHoriz) {
+        // Both sides are vertical (top/bottom) - Use a horizontal mid-segment
+        const midY = (p1Y + p4Y) / 2;
+        points.push([p1X, midY], [p4X, midY]);
     } else {
-        // One is horizontal, one is vertical (elbow turn)
-        if (isHorizontalExit) {
-            points.push([entryX, exitY]);
+        // Elbow turn (One horiz, one vert)
+        if (isSrcHoriz) {
+            points.push([p4X, p1Y]);
         } else {
-            points.push([exitX, entryY]);
+            points.push([p1X, p4Y]);
         }
     }
 
-    points.push([entryX, entryY], [tX, tY]);
+    points.push([p4X, p4Y], [tX, tY]);
 
-    // Clean up duplicate consecutive points
+    // Remove redundant consecutive points
     const filteredPoints = points.filter((p, i) => {
         if (i === 0) return true;
         return p[0] !== points[i-1][0] || p[1] !== points[i-1][1];
