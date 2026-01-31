@@ -9,7 +9,7 @@ import { ICON_SIZE } from '@/lib/constants';
 
 interface AndroidFolderProps {
   fId?: string;
-  index: number;
+  index?: number;
   isMain?: boolean;
   registry: Record<string, FolderData>;
   activeView: string | null;
@@ -41,11 +41,14 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
     
     const isExpanded = activeView === (isMain ? 'launcher' : fId);
     
+    // Fix NaN by ensuring index is at least 0
+    const safeIndex = index ?? 0;
+    
     // CSS-driven positioning:
-    // Collapsed: index * 4 (slight overlap)
-    // Expanded: index * 58 (full spread)
+    // Collapsed: safeIndex * 4 (slight overlap)
+    // Expanded: safeIndex * 58 (full spread)
     const stackSpread = simulatedOffset;
-    const bottomValue = isMain ? 40 : 40 + (index * stackSpread * 52) + (index * 6);
+    const bottomValue = isMain ? 40 : 40 + (safeIndex * stackSpread * 52) + (safeIndex * 6);
     
     // Using bottom instead of top for stability and performance
     const style: React.CSSProperties = isExpanded 
@@ -57,7 +60,7 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
           height: '100%', 
           borderRadius: 0, 
           zIndex: 500,
-          transition: 'all 0.15s ease-out' // Faster overall transition
+          transition: 'all 0.1s ease-out' // Ultra-fast transition
         } 
       : { 
           position: 'fixed', 
@@ -67,8 +70,8 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
           width: '48px', 
           height: '48px', 
           borderRadius: '0.75rem', 
-          zIndex: 100 - index,
-          transition: isDraggingDrawer ? 'none' : 'bottom 0.15s cubic-bezier(0, 0, 0.2, 1), transform 0.15s ease-out'
+          zIndex: 100 - safeIndex,
+          transition: isDraggingDrawer ? 'none' : 'bottom 0.1s cubic-bezier(0, 0, 0.2, 1), transform 0.1s ease-out'
         };
 
     return (
@@ -77,7 +80,7 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
         className={`shadow-2xl overflow-hidden ${isExpanded ? 'bg-white/95 backdrop-blur-3xl' : `${data.color} cursor-pointer border-t border-white/20`} flex items-center justify-center text-white group`} 
         onClick={(e) => { e.stopPropagation(); if (isExpanded) return; onOpen(isMain ? 'launcher' : (fId || null)); }}>
         
-        {!isMain && !isExpanded && index === 0 && (
+        {!isMain && !isExpanded && safeIndex === 0 && (
             <div className="absolute -top-10 left-1/2 -translate-x-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none flex flex-col items-center">
                 {simulatedOffset < 0.5 ? (
                   <div className="animate-bounce flex flex-col items-center">
@@ -93,11 +96,11 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
             </div>
         )}
 
-        <div className={`absolute transition-all duration-150 flex items-center justify-center z-50 ${isExpanded ? 'top-12 left-12 w-16 h-16 bg-slate-100 rounded-2xl text-blue-600 shadow-md' : 'inset-0'}`} onClick={(e) => { if(isExpanded) { e.stopPropagation(); onOpen(null); } }}>
+        <div className={`absolute transition-all duration-100 flex items-center justify-center z-50 ${isExpanded ? 'top-12 left-12 w-16 h-16 bg-slate-100 rounded-2xl text-blue-600 shadow-md' : 'inset-0'}`} onClick={(e) => { if(isExpanded) { e.stopPropagation(); onOpen(null); } }}>
           <SafeIcon name={data.icon} fill={isExpanded ? "none" : "currentColor"} size={ICON_SIZE} />
         </div>
         
-        <div className={`w-full h-full p-8 pt-32 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-8 content-start justify-items-center transition-all duration-200 ${isExpanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
+        <div className={`w-full h-full p-8 pt-32 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-8 content-start justify-items-center transition-all duration-100 ${isExpanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
            { (isMain ? [{id:'studio', name:'Studio', icon:'LayoutTemplate'}, {id:'home', name:'Dashboard', icon:'Home'}] : (data.items || [])).map((item, i) => (
               <div key={i} className="flex flex-col items-center group cursor-pointer active:scale-95 transition-all" onClick={(e) => { e.stopPropagation(); if (isMain && onLaunch) onLaunch(item.id!); else if (onBirth) onBirth(item); }}>
                 <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-sm ${isMain ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 group-hover:bg-blue-600 group-hover:text-white'}`}>
