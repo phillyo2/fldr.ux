@@ -40,7 +40,6 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
     const isExpanded = activeView === (isMain ? 'launcher' : fId);
     
     // When isStackedItem is true, positions are relative to the parent container in page.tsx
-    // Otherwise they use absolute fixed window coordinates.
     const b_offset = isMain ? 40 : 40 + (index * simulatedOffset * 52) + (index * 6);
     const c_top = isStackedItem ? -(index * simulatedOffset * 52) - (index * 6) : windowSize.h - b_offset - 48; 
     const c_left = isStackedItem ? 0 : (isMain ? windowSize.w - 88 : 40);
@@ -51,10 +50,20 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
         className={`shadow-2xl overflow-hidden transition-all duration-300 ${isExpanded ? 'bg-white/95 backdrop-blur-3xl' : `${data.color} cursor-pointer border-t border-white/20`} flex items-center justify-center text-white group`} 
         onClick={(e) => { e.stopPropagation(); if (isExpanded) return; onOpen(isMain ? 'launcher' : (fId || null)); }}>
         
-        {/* Chevron Handle (Only on the top-most folder of the collapsed stack) */}
+        {/* Chevron Handle - non-interactive visual hint */}
         {!isMain && !isExpanded && index === 0 && (
-            <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none flex flex-col items-center">
-                {simulatedOffset < 0.5 ? <ChevronUp size={16} className="animate-bounce" /> : <ChevronDown size={16} />}
+            <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none flex flex-col items-center">
+                {simulatedOffset < 0.5 ? (
+                  <div className="animate-bounce flex flex-col items-center">
+                    <ChevronUp size={16} />
+                    <span className="text-[6px] font-bold uppercase tracking-widest -mt-1">Open</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center opacity-50">
+                    <ChevronDown size={16} />
+                    <span className="text-[6px] font-bold uppercase tracking-widest -mt-1">Close</span>
+                  </div>
+                )}
             </div>
         )}
 
@@ -74,7 +83,7 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
         </div>
 
         { !isMain && isExpanded && (
-             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 opacity-50">
+             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 opacity-50" onClick={() => onOpen(null)}>
                  <ChevronDown size={16}/>
              </div>
         )}

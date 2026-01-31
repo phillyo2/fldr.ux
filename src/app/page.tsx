@@ -42,6 +42,8 @@ export default function App() {
   // Gesture State for Drawer
   const touchStartY = useRef<number | null>(null);
   const initialOffset = useRef<number>(0);
+  const dragDistance = useRef<number>(0);
+  const offsetRef = useRef(simulatedOffset);
 
   const [foldersRegistry, setFoldersRegistry] = useState<Record<string, FolderData>>({
     'actions': { id: 'actions', title: 'Actions', icon: 'Zap', color: 'bg-blue-600', items: [
@@ -64,8 +66,15 @@ export default function App() {
 
   const itemsRef = useRef(canvasItems);
   const connRef = useRef(connections);
-  useEffect(() => { itemsRef.current = canvasItems; }, [canvasItems]);
-  useEffect(() => { connRef.current = connections; }, [connections]);
+  useEffect(() => { 
+    itemsRef.current = canvasItems; 
+  }, [canvasItems]);
+  useEffect(() => { 
+    connRef.current = connections; 
+  }, [connections]);
+  useEffect(() => {
+    offsetRef.current = simulatedOffset;
+  }, [simulatedOffset]);
 
   const lastTap = useRef(0);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -179,7 +188,8 @@ export default function App() {
   };
 
   const animateTo = (target: number) => {
-    const start = simulatedOffset; const startTime = performance.now();
+    const start = offsetRef.current; 
+    const startTime = performance.now();
     const step = (now: number) => {
       const p = Math.min((now - startTime) / 250, 1); 
       setSimulatedOffset(start + (target - start) * (1 - Math.pow(1 - p, 3))); 
@@ -327,6 +337,7 @@ export default function App() {
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     touchStartY.current = clientY;
     initialOffset.current = simulatedOffset;
+    dragDistance.current = 0;
   };
 
   useEffect(() => {
@@ -334,7 +345,8 @@ export default function App() {
       if (touchStartY.current === null) return;
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
       const delta = touchStartY.current - clientY;
-      const sensitivity = 150; // pixels to reach full expansion
+      dragDistance.current = Math.abs(delta);
+      const sensitivity = 200; // pixels to reach full expansion
       const nextOffset = Math.max(0, Math.min(1, initialOffset.current + delta / sensitivity));
       setSimulatedOffset(nextOffset);
     };
@@ -342,9 +354,11 @@ export default function App() {
     const handleUp = () => {
       if (touchStartY.current === null) return;
       touchStartY.current = null;
-      // Snap to nearest state
-      if (simulatedOffset > 0.3) animateTo(1);
-      else animateTo(0);
+      // Snap to nearest state if we actually dragged significantly
+      if (dragDistance.current > 10) {
+          if (offsetRef.current > 0.4) animateTo(1);
+          else animateTo(0);
+      }
     };
 
     window.addEventListener('mousemove', handleMove);
@@ -357,10 +371,10 @@ export default function App() {
       window.removeEventListener('touchmove', handleMove);
       window.removeEventListener('touchend', handleUp);
     };
-  }, [simulatedOffset]);
+  }, []);
 
   const handleOpenFolder = (fId: string) => {
-    if (simulatedOffset < 0.8) {
+    if (offsetRef.current < 0.8) {
         animateTo(1);
     } else {
         setActiveFolderView(fId);
@@ -368,8 +382,10 @@ export default function App() {
   };
 
   const toggleStack = () => {
-    if (simulatedOffset > 0.5) animateTo(0);
-    else animateTo(1);
+    if (dragDistance.current < 10) {
+        if (offsetRef.current > 0.5) animateTo(0);
+        else animateTo(1);
+    }
   };
 
   return (
