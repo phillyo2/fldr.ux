@@ -1,121 +1,215 @@
 /**
- * Strict Manhattan Routing Engine with Rounded Corner Smoothing
- * 
- * Logic:
- * 1. Calculate strict Manhattan points.
- * 2. Enforce shared coordinates to prevent diagonals.
- * 3. Generate SVG path string with quadratic Bézier curves at elbows for smoothness.
+ * GBTF Master Protocol: A* Manhattan Routing Engine
+ * Version: 5.0 [Industrial Loom]
  */
 
-export const snapToGrid = (val: number, offset = 0, gridSize = 32) => 
+import { CanvasItem, Connection } from './types';
+
+const GRID_SIZE = 32;
+const TILE_EXCLUSION_PENALTY = 1000000;
+const PROXIMITY_PENALTY = 50;
+const TURN_PENALTY = 10;
+const FAN_OUT_DISTANCE = 2;
+
+export const snapToGrid = (val: number, offset = 0, gridSize = GRID_SIZE) =>
   Math.round((val - offset) / gridSize) * gridSize + offset;
 
-export const getSmartPath = (
-    sX: number, sY: number, 
-    tX: number, tY: number, 
-    sourceSide: string, 
-    targetSide: string,
-    connId: string = 'default'
-) => {
-    const laneSize = 24; // Distance from port into the grid lane before turning
-    
-    // 1. Initial points
-    let p1X = sX, p1Y = sY;
-    if (sourceSide === 'right') p1X += laneSize;
-    else if (sourceSide === 'left') p1X -= laneSize;
-    else if (sourceSide === 'bottom') p1Y += laneSize;
-    else if (sourceSide === 'top') p1Y -= laneSize;
+interface Point {
+  x: number;
+  y: number;
+}
 
-    let p4X = tX, p4Y = tY;
-    if (targetSide === 'right') p4X += laneSize;
-    else if (targetSide === 'left') p4X -= laneSize;
-    else if (targetSide === 'bottom') p4Y += laneSize;
-    else if (targetSide === 'top') p4Y -= laneSize;
+interface AStarNode extends Point {
+  g: number;
+  f: number;
+  parent: AStarNode | null;
+  direction: string | null;
+}
 
-    const isSrcHoriz = (sourceSide === 'left' || sourceSide === 'right');
-    const isTgtHoriz = (targetSide === 'left' || targetSide === 'right');
+/**
+ * Calculates the Manhattan distance between two points
+ */
+const getHeuristic = (a: Point, b: Point) => {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+};
 
-    let points = [[sX, sY]];
+/**
+ * Checks if a point is within a tile's exclusion zone (tile + 1 grid unit buffer)
+ */
+const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], targetId: string, sourceId: string) => {
+  for (const tile of tiles) {
+    // We allow the path to be at the connection points of the source and target tiles
+    if (tile.instanceId === sourceId || tile.instanceId === targetId) continue;
 
-    // 2. Routing logic
-    const isRecursive = (p1Y > p4Y && targetSide === 'top');
-    
-    if (isRecursive) {
-        // Backwards loop logic
-        const swingX = Math.max(p1X, p4X) + 64;
-        points.push([p1X, p1Y], [swingX, p1Y], [swingX, p4Y], [p4X, p4Y]);
+    const buffer = GRID_SIZE;
+    const left = tile.x - buffer;
+    const right = tile.x + GRID_SIZE + buffer;
+    const top = tile.y - buffer;
+    const bottom = tile.y + GRID_SIZE + buffer;
+
+    if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Generates the SVG path string from A* results with rounded corners
+ */
+const generateRoundedPath = (points: Point[]) => {
+  if (points.length < 2) return '';
+  const radius = 8;
+  let d = `M ${points[0].x} ${points[0].y}`;
+
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const next = points[i + 1];
+
+    if (next) {
+      const d1 = Math.sqrt(Math.pow(curr.x - prev.x, 2) + Math.pow(curr.y - prev.y, 2));
+      const d2 = Math.sqrt(Math.pow(next.x - curr.x, 2) + Math.pow(next.y - curr.y, 2));
+      const r = Math.min(radius, d1 / 2, d2 / 2);
+
+      const v1 = { x: (curr.x - prev.x) / d1, y: (curr.y - prev.y) / d1 };
+      const v2 = { x: (next.x - curr.x) / d2, y: (next.y - curr.y) / d2 };
+
+      const pStart = { x: curr.x - v1.x * r, y: curr.y - v1.y * r };
+      const pEnd = { x: curr.x + v2.x * r, y: curr.y + v2.y * r };
+
+      d += ` L ${pStart.x} ${pStart.y} Q ${curr.x} ${curr.y} ${pEnd.x} ${pEnd.y}`;
     } else {
-        if (isSrcHoriz && isTgtHoriz) {
-            const midX = (p1X + p4X) / 2;
-            points.push([p1X, p1Y], [midX, p1Y], [midX, p4Y], [p4X, p4Y]);
-        } else if (!isSrcHoriz && !isTgtHoriz) {
-            const midY = (p1Y + p4Y) / 2;
-            points.push([p1X, midY], [p4X, midY]);
-        } else {
-            const clipsNode = Math.abs(p4X - sX) < 24 && Math.abs(p1Y - sY) < 24;
-            if (clipsNode) {
-                const bypassY = p1Y + (p4Y > p1Y ? 48 : -48);
-                points.push([p1X, p1Y], [p1X, bypassY], [p4X, bypassY], [p4X, p4Y]);
-            } else {
-                points.push([p1X, p1Y], [p4X, p1Y], [p4X, p4Y]);
-            }
-        }
+      d += ` L ${curr.x} ${curr.y}`;
+    }
+  }
+  return d;
+};
+
+export const getSmartPath = (
+  sX: number,
+  sY: number,
+  tX: number,
+  tY: number,
+  sourceSide: string,
+  targetSide: string,
+  sourceId: string,
+  targetId: string,
+  tiles: CanvasItem[],
+  globalOccupancy: Set<string> = new Set()
+) => {
+  // 1. FAN-OUT: Initialize start position and force movement away from tile
+  let startPoints: Point[] = [{ x: sX, y: sY }];
+  let currentPos = { x: sX, y: sY };
+  let exitVector = { x: 0, y: 0 };
+
+  if (sourceSide === 'right') exitVector.x = GRID_SIZE;
+  else if (sourceSide === 'left') exitVector.x = -GRID_SIZE;
+  else if (sourceSide === 'bottom') exitVector.y = GRID_SIZE;
+  else if (sourceSide === 'top') exitVector.y = -GRID_SIZE;
+
+  for (let i = 0; i < FAN_OUT_DISTANCE; i++) {
+    currentPos = { x: currentPos.x + exitVector.x, y: currentPos.y + exitVector.y };
+    startPoints.push({ ...currentPos });
+  }
+
+  // 2. A* SEARCH
+  const target = { x: tX, y: tY };
+  const openList: AStarNode[] = [
+    {
+      ...currentPos,
+      g: 0,
+      f: getHeuristic(currentPos, target),
+      parent: null,
+      direction: sourceSide,
+    },
+  ];
+  const closedList = new Set<string>();
+
+  let finalNode: AStarNode | null = null;
+  let iterations = 0;
+  const MAX_ITERATIONS = 500; // Safety break
+
+  while (openList.length > 0 && iterations < MAX_ITERATIONS) {
+    iterations++;
+    // Sort by f score (lowest first)
+    openList.sort((a, b) => a.f - b.f);
+    const current = openList.shift()!;
+    const key = `${current.x},${current.y}`;
+
+    if (Math.abs(current.x - target.x) < 5 && Math.abs(current.y - target.y) < 5) {
+      finalNode = current;
+      break;
     }
 
-    points.push([tX, tY]);
+    closedList.add(key);
 
-    // 3. Enforce strict Manhattan (prevent diagonals)
-    const strictPoints: number[][] = [];
-    points.forEach((p, i) => {
-        if (i === 0) {
-            strictPoints.push(p);
-            return;
-        }
-        const prev = strictPoints[strictPoints.length - 1];
-        if (p[0] !== prev[0] && p[1] !== prev[1]) {
-            // Prefer turning based on exit direction
-            if (isSrcHoriz) strictPoints.push([p[0], prev[1]]);
-            else strictPoints.push([prev[0], p[1]]);
-        }
-        strictPoints.push(p);
-    });
+    const neighbors = [
+      { x: current.x + GRID_SIZE, y: current.y, dir: 'right' },
+      { x: current.x - GRID_SIZE, y: current.y, dir: 'left' },
+      { x: current.x, y: current.y + GRID_SIZE, dir: 'bottom' },
+      { x: current.x, y: current.y - GRID_SIZE, dir: 'top' },
+    ];
 
-    // Clean duplicates
-    const finalPoints = strictPoints.filter((p, i) => {
-        if (i === 0) return true;
-        return p[0] !== strictPoints[i-1][0] || p[1] !== strictPoints[i-1][1];
-    });
+    for (const neighbor of neighbors) {
+      if (closedList.has(`${neighbor.x},${neighbor.y}`)) continue;
 
-    // 4. Rounded corners SVG generation
-    const radius = 8;
-    let d = `M ${finalPoints[0][0]} ${finalPoints[0][1]}`;
+      let moveCost = GRID_SIZE;
 
-    for (let i = 1; i < finalPoints.length; i++) {
-        const prev = finalPoints[i - 1];
-        const curr = finalPoints[i];
-        const next = finalPoints[i + 1];
+      // RULE: Exclusion Zones
+      if (isInsideTileExclusion(neighbor, tiles, targetId, sourceId)) {
+        moveCost += TILE_EXCLUSION_PENALTY;
+      }
 
-        if (next) {
-            // Distance to next elbow
-            const d1 = Math.sqrt(Math.pow(curr[0] - prev[0], 2) + Math.pow(curr[1] - prev[1], 2));
-            const d2 = Math.sqrt(Math.pow(next[0] - curr[0], 2) + Math.pow(next[1] - curr[1], 2));
-            const r = Math.min(radius, d1 / 2, d2 / 2);
+      // RULE: Proximity Penalty (Avoid other paths)
+      const isNearOtherPath = 
+        globalOccupancy.has(`${neighbor.x + GRID_SIZE},${neighbor.y}`) ||
+        globalOccupancy.has(`${neighbor.x - GRID_SIZE},${neighbor.y}`) ||
+        globalOccupancy.has(`${neighbor.x},${neighbor.y + GRID_SIZE}`) ||
+        globalOccupancy.has(`${neighbor.x},${neighbor.y - GRID_SIZE}`);
+      
+      if (isNearOtherPath) {
+        moveCost += PROXIMITY_PENALTY;
+      }
 
-            // Vector to curr from prev
-            const v1 = [(curr[0] - prev[0]) / d1, (curr[1] - prev[1]) / d1];
-            // Vector to next from curr
-            const v2 = [(next[0] - curr[0]) / d2, (next[1] - curr[1]) / d2];
+      // RULE: Turn Penalty
+      if (current.direction && current.direction !== neighbor.dir) {
+        moveCost += TURN_PENALTY;
+      }
 
-            // Point before corner
-            const pStart = [curr[0] - v1[0] * r, curr[1] - v1[1] * r];
-            // Point after corner
-            const pEnd = [curr[0] + v2[0] * r, curr[1] + v2[1] * r];
+      const g = current.g + moveCost;
+      const h = getHeuristic(neighbor, target);
+      const f = g + h;
 
-            d += ` L ${pStart[0]} ${pStart[1]} Q ${curr[0]} ${curr[1]} ${pEnd[0]} ${pEnd[1]}`;
-        } else {
-            d += ` L ${curr[0]} ${curr[1]}`;
-        }
+      const existingInOpen = openList.find(n => n.x === neighbor.x && n.y === neighbor.y);
+      if (existingInOpen && existingInOpen.g <= g) continue;
+
+      if (!existingInOpen) {
+        openList.push({ ...neighbor, g, f, parent: current, direction: neighbor.dir });
+      } else {
+        existingInOpen.g = g;
+        existingInOpen.f = f;
+        existingInOpen.parent = current;
+        existingInOpen.direction = neighbor.dir;
+      }
     }
+  }
 
-    return d;
+  // 3. RECONSTRUCT PATH
+  const points: Point[] = [];
+  let curr: AStarNode | null = finalNode;
+  while (curr) {
+    points.unshift({ x: curr.x, y: curr.y });
+    curr = curr.parent;
+  }
+
+  // Combine Fan-out with A* path
+  const finalPoints = [...startPoints.slice(0, -1), ...points];
+  
+  // Add target point if Iteration limit hit early
+  if (finalPoints[finalPoints.length - 1].x !== tX || finalPoints[finalPoints.length - 1].y !== tY) {
+    finalPoints.push({ x: tX, y: tY });
+  }
+
+  return generateRoundedPath(finalPoints);
 };

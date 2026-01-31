@@ -130,13 +130,11 @@ export default function App() {
       
       const isRecursion = isDescendantOf(other.instanceId, dId, connRef.current);
       
-      // Stage 1: Reveal dots early
       if (adx > DETECTION_RANGE || ady > DETECTION_RANGE) return;
 
       let targetPort = null; let sourcePort = null;
       let color = 'bg-slate-300';
 
-      // Source-Driven Port Logic
       if (adx < SNAP_TOLERANCE) {
           if (dy > 0) { targetPort = 'bottom'; sourcePort = 'top'; color = 'bg-emerald-500'; } 
           else { targetPort = 'top'; sourcePort = 'bottom'; color = 'bg-blue-500'; } 
@@ -145,7 +143,6 @@ export default function App() {
           else { targetPort = 'left'; sourcePort = 'right'; color = 'bg-amber-400'; } 
       }
 
-      // Recursion Rule: Strictly Blue Top
       if (isRecursion) {
           targetPort = 'top'; color = 'bg-blue-500';
           if (dy > adx) sourcePort = 'bottom';
@@ -269,7 +266,6 @@ export default function App() {
       const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
       setGhostConnections(ghosts);
 
-      // Stage 2: Handshake (Persistent tether after touching)
       if (!activeTether) {
           const best = ghosts[0] as any;
           if (best && best.dotDistance < 12) {
@@ -299,7 +295,6 @@ export default function App() {
         if (!item) return prev;
         let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
         
-        // Strict Adjacent Snap only
         const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x: item.x, y: item.y });
         const best = ghosts[0] as any;
         if (best && best.dotDistance < 8) { finalX = best.snapX!; finalY = best.snapY!; }
@@ -352,14 +347,13 @@ export default function App() {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
 
-                        // Stealth Connection: Hide path IF adjacent
                         const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
                         if (isAdjacent) return null;
 
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         
-                        let d = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.id);
+                        let d = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                         const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
                         return <path key={conn.id} d={d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" className="drop-shadow-sm" />;
                     })}
@@ -375,7 +369,7 @@ export default function App() {
                         const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('blue') ? '#3B82F6' : '#FBBF24';
                         
-                        const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, 'tether');
+                        const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
                         return <path d={tetherPath} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
                     })()}
                 </svg>
@@ -394,7 +388,6 @@ export default function App() {
                   </div>
                 ))}
 
-                {/* Segment Balls - Anchored 50% */}
                 {connections.map(conn => {
                     const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                     if(!s || !t) return null;
@@ -418,7 +411,6 @@ export default function App() {
                     )
                 })}
 
-                {/* Latch points */}
                 {canvasItems.map(item => {
                   const involvesRecursion = draggingId && isDescendantOf(item.instanceId, draggingId, connRef.current);
                   return (
@@ -428,12 +420,10 @@ export default function App() {
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           
-                          // Stage 1: Guidance (Show dots early)
                           const isGuidance = !!ghost;
                           const isConnected = !!outgoingLink || !!incomingLink;
                           const isVisible = isGuidance || isConnected;
                           
-                          // Recursion logic: only Blue Top allowed
                           const isForbiddenRecursion = involvesRecursion && lp.id !== 'top';
                           
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : lp.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
