@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef } from 'react';
@@ -87,7 +88,7 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
   return (
     <div 
       ref={containerRef}
-      className="flex-1 relative overflow-hidden canvas-grid bg-background select-none h-full"
+      className="w-full h-full relative overflow-hidden canvas-grid bg-background select-none"
       onMouseMove={handleMouseMove}
       onMouseDown={() => onSelectNode(null)}
       onMouseUp={() => setActiveConnection(null)}
@@ -118,7 +119,7 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
                 d={`M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${end.y}, ${end.x} ${end.y}`}
                 fill="none"
                 stroke="hsl(var(--primary))"
-                strokeWidth="2.5"
+                strokeWidth="3"
                 markerEnd="url(#arrowhead)"
                 className="transition-all hover:stroke-accent cursor-pointer pointer-events-auto"
                 onClick={(e) => {
@@ -139,7 +140,7 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
               d={`M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${activeConnection.mouseY}, ${activeConnection.mouseX} ${activeConnection.mouseY}`}
               fill="none"
               stroke="hsl(var(--accent))"
-              strokeWidth="2.5"
+              strokeWidth="3"
               strokeDasharray="5,5"
               className="animate-pulse-subtle"
             />
