@@ -1,14 +1,7 @@
-
 "use client";
 
 import React from 'react';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogDescription 
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { NodeType } from '@/lib/types';
 import { Zap, Box, Play, Plus, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -32,11 +25,7 @@ const nodeTemplates = [
   { type: 'action' as const, label: 'Log Event', icon: <Play className="w-4 h-4" /> },
 ];
 
-export const NodeLibraryModal: React.FC<NodeLibraryModalProps> = ({
-  isOpen,
-  onClose,
-  onAddNode
-}) => {
+export const NodeLibraryModal: React.FC<NodeLibraryModalProps> = ({ isOpen, onClose, onAddNode }) => {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[425px] h-[70vh] flex flex-col p-0 overflow-hidden border-2 rounded-2xl">
@@ -44,21 +33,19 @@ export const NodeLibraryModal: React.FC<NodeLibraryModalProps> = ({
           <DialogTitle className="text-2xl font-headline font-bold text-primary">Add New Node</DialogTitle>
           <DialogDescription>Select a component to add to your flow</DialogDescription>
         </DialogHeader>
-        
         <div className="p-4 border-b bg-muted/20">
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input placeholder="Search components..." className="pl-10 h-10 rounded-xl bg-white" />
           </div>
         </div>
-
         <ScrollArea className="flex-1 p-4">
           <div className="grid grid-cols-1 gap-3 pb-8">
             {nodeTemplates.map((tpl, i) => (
               <button
                 key={i}
                 onClick={() => onAddNode(tpl.type, tpl.label)}
-                className="flex items-center justify-between p-4 rounded-xl border-2 bg-white hover:border-primary hover:bg-primary/5 hover:shadow-md transition-all group text-left"
+                className="flex items-center justify-between p-4 rounded-xl border-2 bg-white hover:border-primary hover:bg-primary/5 transition-all group text-left"
               >
                 <div className="flex items-center gap-4">
                   <div className={cn(

@@ -1,4 +1,3 @@
-
 export type NodeType = 'trigger' | 'action' | 'logic';
 
 export interface LogicPort {

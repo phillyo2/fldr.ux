@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useRef } from 'react';
@@ -59,13 +58,10 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
 
   const handleCompleteConnection = (targetNodeId: string, targetPortId: string) => {
     if (!activeConnection) return;
-    
-    // Self connection prevention
     if (activeConnection.sourceId === targetNodeId) {
       setActiveConnection(null);
       return;
     }
-
     onConnect(activeConnection.sourceId, activeConnection.sourcePortId, targetNodeId, targetPortId);
     setActiveConnection(null);
   };
@@ -73,15 +69,11 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
   const getPortPosition = (nodeId: string, portId: string, direction: 'input' | 'output') => {
     const node = flow.nodes.find(n => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
-    
-    // Find index of port
     const portIndex = direction === 'input' 
       ? node.inputs.findIndex(p => p.id === portId)
       : node.outputs.findIndex(p => p.id === portId);
-    
     const x = direction === 'input' ? node.position.x : node.position.x + 180;
-    const y = node.position.y + 70 + (portIndex * 28); // Adjusted for UI
-    
+    const y = node.position.y + 70 + (portIndex * 28);
     return { x, y };
   };
 
@@ -95,43 +87,30 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
     >
       <svg className="absolute inset-0 pointer-events-none w-full h-full">
         <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="10"
-            refY="3.5"
-            orient="auto"
-          >
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
             <polygon points="0 0, 10 3.5, 0 7" fill="hsl(var(--primary))" />
           </marker>
         </defs>
-
-        {/* Existing Connections */}
         {flow.connections.map(conn => {
           const start = getPortPosition(conn.sourceId, conn.sourcePortId, 'output');
           const end = getPortPosition(conn.targetId, conn.targetPortId, 'input');
           const midX = (start.x + end.x) / 2;
-          
           return (
-            <g key={conn.id}>
-              <path
-                d={`M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${end.y}, ${end.x} ${end.y}`}
-                fill="none"
-                stroke="hsl(var(--primary))"
-                strokeWidth="3"
-                markerEnd="url(#arrowhead)"
-                className="transition-all hover:stroke-accent cursor-pointer pointer-events-auto"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDisconnect(conn.id);
-                }}
-              />
-            </g>
+            <path
+              key={conn.id}
+              d={`M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${end.y}, ${end.x} ${end.y}`}
+              fill="none"
+              stroke="hsl(var(--primary))"
+              strokeWidth="3"
+              markerEnd="url(#arrowhead)"
+              className="transition-all hover:stroke-accent cursor-pointer pointer-events-auto"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDisconnect(conn.id);
+              }}
+            />
           );
         })}
-
-        {/* Active Connection Wire */}
         {activeConnection && (() => {
           const start = getPortPosition(activeConnection.sourceId, activeConnection.sourcePortId, 'output');
           const midX = (start.x + activeConnection.mouseX) / 2;
@@ -147,7 +126,6 @@ export const EditorCanvas: React.FC<CanvasProps> = ({
           );
         })()}
       </svg>
-
       {flow.nodes.map(node => (
         <NodeElement
           key={node.id}

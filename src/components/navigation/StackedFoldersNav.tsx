@@ -1,9 +1,7 @@
-
 "use client";
 
 import React, { useState } from 'react';
 import { Plus, Layers, MousePointer2, Settings, Files, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 

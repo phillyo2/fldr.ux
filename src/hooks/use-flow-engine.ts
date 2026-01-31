@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useCallback } from 'react';
@@ -78,14 +77,5 @@ export function useFlowEngine() {
     }));
   }, []);
 
-  return {
-    flow,
-    addNode,
-    updateNodePosition,
-    updateNodeData,
-    removeNode,
-    connect,
-    disconnect,
-    setFlow
-  };
+  return { flow, addNode, updateNodePosition, updateNodeData, removeNode, connect, disconnect };
 }

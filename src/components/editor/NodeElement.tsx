@@ -1,8 +1,7 @@
-
 "use client";
 
 import React, { useRef, useEffect, useState } from 'react';
-import { LogicNode, LogicPort } from '@/lib/types';
+import { LogicNode } from '@/lib/types';
 import { Card } from '@/components/ui/card';
 import { Settings2, X, Play, Zap, Box, Code } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -35,7 +34,6 @@ export const NodeElement: React.FC<NodeProps> = ({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.port-handle')) return;
-    
     setIsDragging(true);
     setDragOffset({
       x: e.clientX - node.position.x,
@@ -50,16 +48,11 @@ export const NodeElement: React.FC<NodeProps> = ({
       if (!isDragging) return;
       onUpdatePosition(e.clientX - dragOffset.x, e.clientY - dragOffset.y);
     };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-
+    const handleMouseUp = () => setIsDragging(false);
     if (isDragging) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
     }
-
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
@@ -78,10 +71,7 @@ export const NodeElement: React.FC<NodeProps> = ({
   return (
     <div
       ref={nodeRef}
-      className={cn(
-        "absolute cursor-grab active:cursor-grabbing transition-shadow",
-        isDragging && "z-50"
-      )}
+      className={cn("absolute cursor-grab active:cursor-grabbing transition-shadow", isDragging && "z-50")}
       style={{ left: node.position.x, top: node.position.y }}
       onMouseDown={handleMouseDown}
     >
@@ -103,7 +93,6 @@ export const NodeElement: React.FC<NodeProps> = ({
             </button>
           </div>
         </div>
-        
         <div className="p-3">
           <h3 className="text-sm font-semibold">{node.label}</h3>
           {node.customCode && (
@@ -114,40 +103,23 @@ export const NodeElement: React.FC<NodeProps> = ({
             </div>
           )}
         </div>
-
-        {/* Ports */}
         <div className="flex justify-between px-0 relative pb-2">
-          {/* Inputs */}
           <div className="flex flex-col gap-2 -ml-2.5">
             {node.inputs.map(port => (
               <div key={port.id} className="group flex items-center gap-2 relative">
                 <div 
-                  className="port-handle w-5 h-5 rounded-full border-2 border-background bg-border hover:bg-accent hover:border-accent hover:scale-125 transition-all cursor-crosshair flex items-center justify-center"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    onCompleteConnection(node.id, port.id, port.type);
-                  }}
+                  className="port-handle w-5 h-5 rounded-full border-2 border-background bg-border hover:bg-accent hover:border-accent hover:scale-125 transition-all cursor-crosshair"
+                  onMouseDown={(e) => { e.stopPropagation(); onCompleteConnection(node.id, port.id, port.type); }}
                 />
-                <span className="text-[10px] text-muted-foreground font-medium opacity-0 group-hover:opacity-100 transition-opacity absolute left-6 whitespace-nowrap bg-white px-1 rounded shadow-sm">
-                  {port.name}
-                </span>
               </div>
             ))}
           </div>
-
-          {/* Outputs */}
           <div className="flex flex-col gap-2 -mr-2.5 items-end">
             {node.outputs.map(port => (
               <div key={port.id} className="group flex items-center gap-2 relative">
-                <span className="text-[10px] text-muted-foreground font-medium opacity-0 group-hover:opacity-100 transition-opacity absolute right-6 whitespace-nowrap bg-white px-1 rounded shadow-sm text-right">
-                  {port.name}
-                </span>
                 <div 
-                  className="port-handle w-5 h-5 rounded-full border-2 border-background bg-border hover:bg-primary hover:border-primary hover:scale-125 transition-all cursor-crosshair flex items-center justify-center"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    onStartConnection(node.id, port.id, port.type);
-                  }}
+                  className="port-handle w-5 h-5 rounded-full border-2 border-background bg-border hover:bg-primary hover:border-primary hover:scale-125 transition-all cursor-crosshair"
+                  onMouseDown={(e) => { e.stopPropagation(); onStartConnection(node.id, port.id, port.type); }}
                 />
               </div>
             ))}

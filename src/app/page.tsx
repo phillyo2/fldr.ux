@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState } from 'react';
@@ -9,7 +8,6 @@ import { NodePropertiesDrawer } from '@/components/editor/NodePropertiesDrawer';
 import { NodeLibraryModal } from '@/components/editor/NodeLibraryModal';
 import { useFlowEngine } from '@/hooks/use-flow-engine';
 import { Toaster } from '@/components/ui/toaster';
-import { LogicNode } from '@/lib/types';
 
 export default function FldrUxEditor() {
   const {
