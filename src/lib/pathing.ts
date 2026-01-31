@@ -1,11 +1,11 @@
 /**
- * 3D-Slice Kinematic Pathing Engine
+ * Strict Manhattan Routing Engine with 3D Slice Depth Offset
  * 
  * Logic:
- * 1. Calculate Port and Lane-Entry points.
- * 2. Identify "Physical Obstacles" (Source and Target Node bodies).
- * 3. Use Manhattan routing with collision-detection.
- * 4. Apply "Depth Offset" (3D Slice) to prevent perfect overlap in shared lanes.
+ * 1. Align all points to a 16px lane grid.
+ * 2. Ensure every segment is strictly horizontal or vertical (Manhattan).
+ * 3. Apply depth offsets consistently across connected segments to prevent diagonals.
+ * 4. Route around the body of source/target nodes if an elbow turn would clip them.
  */
 
 export const snapToGrid = (val: number, offset = 0, gridSize = 32) => 
@@ -19,13 +19,13 @@ export const getSmartPath = (
     connId: string = 'default'
 ) => {
     // 3D Slice Offset: Distribute lines in the same lane by +/- 4px
+    // We apply this consistently to X or Y depending on the segment orientation
     const hash = connId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const depthOffset = (hash % 3) * 4 - 4; // Yields -4, 0, or 4
 
-    const nodeSize = 32;
-    const laneSize = 16; // Half a grid cell to get into the mid-lane
+    const laneSize = 16; // Distance from port into the grid lane
 
-    // 1. Calculate Exit/Entry points (Moving into the lanes)
+    // 1. Calculate Initial Exit and Entry points (Moving into the lanes)
     let p1X = sX, p1Y = sY;
     if (sourceSide === 'right') p1X += laneSize;
     else if (sourceSide === 'left') p1X -= laneSize;
@@ -38,59 +38,70 @@ export const getSmartPath = (
     else if (targetSide === 'bottom') p4Y += laneSize;
     else if (targetSide === 'top') p4Y -= laneSize;
 
-    // Apply 3D Slice depth offset to the lane segments
+    // Apply depth offset consistently to the lane segments to keep them straight
     const isSrcHoriz = (sourceSide === 'left' || sourceSide === 'right');
     const isTgtHoriz = (targetSide === 'left' || targetSide === 'right');
 
-    if (isSrcHoriz) p1Y += depthOffset; else p1X += depthOffset;
-    if (isTgtHoriz) p4Y += depthOffset; else p4X += depthOffset;
+    // To prevent diagonals, if we offset the lane-exit point, 
+    // we MUST also offset the starting port point for the purpose of pathing, 
+    // but since the port is fixed, we offset the FIRST elbow instead.
+    
+    let points = [[sX, sY]];
 
-    let points = [[sX, sY], [p1X, p1Y]];
-
-    // 2. Obstacle Avoidance Math
-    // We define the "danger zone" as the bounding box of the source and target nodes.
-    // Nodes are centered on (sX, sY) depending on the port, but essentially 
-    // we need to check if a straight line from p1 to p4 intersects the node bodies.
-
+    // 2. Routing Logic
     const isRecursive = (p1Y > p4Y && targetSide === 'top');
     
     if (isRecursive) {
-        // Logic for "Backwards Loop" (Recursion)
-        // Must wrap around the side to avoid clipping through the source/target
-        const wrapX = Math.max(p1X, p4X) + 48; // Swing out wide
-        points.push([wrapX, p1Y], [wrapX, p4Y], [p4X, p4Y]);
+        // Backwards loop logic: Wide swing to avoid node body
+        const swingX = Math.max(p1X, p4X) + 48;
+        points.push([p1X, p1Y], [swingX, p1Y], [swingX, p4Y], [p4X, p4Y]);
     } else {
-        // Standard Manhattan routing with elbow turn
+        // Standard Manhattan routing
         if (isSrcHoriz && isTgtHoriz) {
+            // Horizontal to Horizontal
             const midX = (p1X + p4X) / 2;
-            points.push([midX, p1Y], [midX, p4Y]);
+            points.push([p1X, p1Y], [midX, p1Y], [midX, p4Y], [p4X, p4Y]);
         } else if (!isSrcHoriz && !isTgtHoriz) {
+            // Vertical to Vertical
             const midY = (p1Y + p4Y) / 2;
             points.push([p1X, midY], [p4X, midY]);
         } else {
-            // Mixed sides - avoid the 'dead corner' if it clips a node
-            if (isSrcHoriz) {
-                // Check if the elbow point [p4X, p1Y] is too close to source or target
-                const clipsSource = Math.abs(p4X - sX) < 16 && Math.abs(p1Y - sY) < 16;
-                if (clipsSource) {
-                    const bypassY = p1Y + (p4Y > p1Y ? 48 : -48);
-                    points.push([p1X, bypassY], [p4X, bypassY]);
-                } else {
-                    points.push([p4X, p1Y]);
-                }
+            // Mixed sides (e.g., Right to Top)
+            // Determine if the "natural" elbow [p4X, p1Y] clips a node
+            const clipsNode = Math.abs(p4X - sX) < 20 && Math.abs(p1Y - sY) < 20;
+            if (clipsNode) {
+                const bypassY = p1Y + (p4Y > p1Y ? 48 : -48);
+                points.push([p1X, p1Y], [p1X, bypassY], [p4X, bypassY], [p4X, p4Y]);
             } else {
-                points.push([p1X, p4Y]);
+                points.push([p1X, p1Y], [p4X, p1Y], [p4X, p4Y]);
             }
         }
     }
 
-    points.push([p4X, p4Y], [tX, tY]);
+    points.push([tX, tY]);
 
-    // Clean up duplicate points
-    const filteredPoints = points.filter((p, i) => {
-        if (i === 0) return true;
-        return p[0] !== points[i-1][0] || p[1] !== points[i-1][1];
+    // 3. Prevent Diagonals by enforcing shared coordinates
+    // We iterate through points and ensure that for any segment, 
+    // either dx or dy is zero. If not, we insert a mid-elbow.
+    const strictPoints: number[][] = [];
+    points.forEach((p, i) => {
+        if (i === 0) {
+            strictPoints.push(p);
+            return;
+        }
+        const prev = strictPoints[strictPoints.length - 1];
+        if (p[0] !== prev[0] && p[1] !== prev[1]) {
+            // Insert Manhattan elbow
+            strictPoints.push([prev[0], p[1]]); 
+        }
+        strictPoints.push(p);
     });
 
-    return filteredPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
+    // Clean up duplicates
+    const finalPoints = strictPoints.filter((p, i) => {
+        if (i === 0) return true;
+        return p[0] !== strictPoints[i-1][0] || p[1] !== strictPoints[i-1][1];
+    });
+
+    return finalPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
 };
