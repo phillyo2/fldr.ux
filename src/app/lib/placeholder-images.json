@@ -1,0 +1,11 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "hero-abstract",
+      "description": "Abstract purple geometric pattern",
+      "imageUrl": "https://picsum.photos/seed/fldr1/1200/800",
+      "imageHint": "abstract purple"
+    }
+  ]
+}
