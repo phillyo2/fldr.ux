@@ -1,11 +1,10 @@
 /**
- * Strict Manhattan Routing Engine with 3D Slice Depth Offset
+ * Strict Manhattan Routing Engine with Rounded Corner Smoothing
  * 
  * Logic:
- * 1. Align all points to a 16px lane grid.
- * 2. Ensure every segment is strictly horizontal or vertical (Manhattan).
- * 3. Apply depth offsets consistently across connected segments to prevent diagonals.
- * 4. Route around the body of source/target nodes if an elbow turn would clip them.
+ * 1. Calculate strict Manhattan points.
+ * 2. Enforce shared coordinates to prevent diagonals.
+ * 3. Generate SVG path string with quadratic Bézier curves at elbows for smoothness.
  */
 
 export const snapToGrid = (val: number, offset = 0, gridSize = 32) => 
@@ -18,14 +17,9 @@ export const getSmartPath = (
     targetSide: string,
     connId: string = 'default'
 ) => {
-    // 3D Slice Offset: Distribute lines in the same lane by +/- 4px
-    // We apply this consistently to X or Y depending on the segment orientation
-    const hash = connId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const depthOffset = (hash % 3) * 4 - 4; // Yields -4, 0, or 4
-
-    const laneSize = 16; // Distance from port into the grid lane
-
-    // 1. Calculate Initial Exit and Entry points (Moving into the lanes)
+    const laneSize = 24; // Distance from port into the grid lane before turning
+    
+    // 1. Initial points
     let p1X = sX, p1Y = sY;
     if (sourceSide === 'right') p1X += laneSize;
     else if (sourceSide === 'left') p1X -= laneSize;
@@ -38,37 +32,27 @@ export const getSmartPath = (
     else if (targetSide === 'bottom') p4Y += laneSize;
     else if (targetSide === 'top') p4Y -= laneSize;
 
-    // Apply depth offset consistently to the lane segments to keep them straight
     const isSrcHoriz = (sourceSide === 'left' || sourceSide === 'right');
     const isTgtHoriz = (targetSide === 'left' || targetSide === 'right');
 
-    // To prevent diagonals, if we offset the lane-exit point, 
-    // we MUST also offset the starting port point for the purpose of pathing, 
-    // but since the port is fixed, we offset the FIRST elbow instead.
-    
     let points = [[sX, sY]];
 
-    // 2. Routing Logic
+    // 2. Routing logic
     const isRecursive = (p1Y > p4Y && targetSide === 'top');
     
     if (isRecursive) {
-        // Backwards loop logic: Wide swing to avoid node body
-        const swingX = Math.max(p1X, p4X) + 48;
+        // Backwards loop logic
+        const swingX = Math.max(p1X, p4X) + 64;
         points.push([p1X, p1Y], [swingX, p1Y], [swingX, p4Y], [p4X, p4Y]);
     } else {
-        // Standard Manhattan routing
         if (isSrcHoriz && isTgtHoriz) {
-            // Horizontal to Horizontal
             const midX = (p1X + p4X) / 2;
             points.push([p1X, p1Y], [midX, p1Y], [midX, p4Y], [p4X, p4Y]);
         } else if (!isSrcHoriz && !isTgtHoriz) {
-            // Vertical to Vertical
             const midY = (p1Y + p4Y) / 2;
             points.push([p1X, midY], [p4X, midY]);
         } else {
-            // Mixed sides (e.g., Right to Top)
-            // Determine if the "natural" elbow [p4X, p1Y] clips a node
-            const clipsNode = Math.abs(p4X - sX) < 20 && Math.abs(p1Y - sY) < 20;
+            const clipsNode = Math.abs(p4X - sX) < 24 && Math.abs(p1Y - sY) < 24;
             if (clipsNode) {
                 const bypassY = p1Y + (p4Y > p1Y ? 48 : -48);
                 points.push([p1X, p1Y], [p1X, bypassY], [p4X, bypassY], [p4X, p4Y]);
@@ -80,9 +64,7 @@ export const getSmartPath = (
 
     points.push([tX, tY]);
 
-    // 3. Prevent Diagonals by enforcing shared coordinates
-    // We iterate through points and ensure that for any segment, 
-    // either dx or dy is zero. If not, we insert a mid-elbow.
+    // 3. Enforce strict Manhattan (prevent diagonals)
     const strictPoints: number[][] = [];
     points.forEach((p, i) => {
         if (i === 0) {
@@ -91,17 +73,49 @@ export const getSmartPath = (
         }
         const prev = strictPoints[strictPoints.length - 1];
         if (p[0] !== prev[0] && p[1] !== prev[1]) {
-            // Insert Manhattan elbow
-            strictPoints.push([prev[0], p[1]]); 
+            // Prefer turning based on exit direction
+            if (isSrcHoriz) strictPoints.push([p[0], prev[1]]);
+            else strictPoints.push([prev[0], p[1]]);
         }
         strictPoints.push(p);
     });
 
-    // Clean up duplicates
+    // Clean duplicates
     const finalPoints = strictPoints.filter((p, i) => {
         if (i === 0) return true;
         return p[0] !== strictPoints[i-1][0] || p[1] !== strictPoints[i-1][1];
     });
 
-    return finalPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
+    // 4. Rounded corners SVG generation
+    const radius = 8;
+    let d = `M ${finalPoints[0][0]} ${finalPoints[0][1]}`;
+
+    for (let i = 1; i < finalPoints.length; i++) {
+        const prev = finalPoints[i - 1];
+        const curr = finalPoints[i];
+        const next = finalPoints[i + 1];
+
+        if (next) {
+            // Distance to next elbow
+            const d1 = Math.sqrt(Math.pow(curr[0] - prev[0], 2) + Math.pow(curr[1] - prev[1], 2));
+            const d2 = Math.sqrt(Math.pow(next[0] - curr[0], 2) + Math.pow(next[1] - curr[1], 2));
+            const r = Math.min(radius, d1 / 2, d2 / 2);
+
+            // Vector to curr from prev
+            const v1 = [(curr[0] - prev[0]) / d1, (curr[1] - prev[1]) / d1];
+            // Vector to next from curr
+            const v2 = [(next[0] - curr[0]) / d2, (next[1] - curr[1]) / d2];
+
+            // Point before corner
+            const pStart = [curr[0] - v1[0] * r, curr[1] - v1[1] * r];
+            // Point after corner
+            const pEnd = [curr[0] + v2[0] * r, curr[1] + v2[1] * r];
+
+            d += ` L ${pStart[0]} ${pStart[1]} Q ${curr[0]} ${curr[1]} ${pEnd[0]} ${pEnd[1]}`;
+        } else {
+            d += ` L ${curr[0]} ${curr[1]}`;
+        }
+    }
+
+    return d;
 };

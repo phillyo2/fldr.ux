@@ -241,7 +241,7 @@ export default function App() {
     }
   };
 
-  const deleteConnection = (e: React.MouseEvent, connId: string) => {
+  const deleteConnection = (e: React.MouseEvent | React.TouchEvent, connId: string) => {
     e.stopPropagation();
     setConnections(prev => prev.filter(c => c.id !== connId));
   };
@@ -361,7 +361,7 @@ export default function App() {
                         
                         let d = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.id);
                         const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
-                        return <path key={conn.id} d={d} stroke={c} strokeWidth="3.5" fill="none" strokeLinecap="round" className="drop-shadow-sm transition-all duration-75" />;
+                        return <path key={conn.id} d={d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" className="drop-shadow-sm" />;
                     })}
                     
                     {activeTether && (() => {
@@ -409,7 +409,8 @@ export default function App() {
                         <div 
                           key={`ball_${conn.id}`} 
                           onClick={(e) => deleteConnection(e, conn.id)}
-                          className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] shadow-md cursor-pointer hover:scale-125 transition-transform group`}
+                          onTouchStart={(e) => deleteConnection(e, conn.id)}
+                          className={`absolute w-4 h-4 bg-white rounded-full border-2 border-white flex items-center justify-center z-[20] shadow-md cursor-pointer pointer-events-auto hover:scale-125 transition-transform group`}
                           style={{ left: midX - 8, top: midY - 8 }}>
                             <div className={`w-2 h-2 rounded-full ${c} animate-pulse-subtle group-hover:hidden`} />
                             <X className="w-2 h-2 text-slate-400 hidden group-hover:block" />
