@@ -41,16 +41,40 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
     
     const isExpanded = activeView === (isMain ? 'launcher' : fId);
     
-    // Using default fallback for windowSize.h to avoid NaN before hydration
-    const viewHeight = windowSize?.h || 768;
-    const b_offset = isMain ? 40 : 40 + (index * simulatedOffset * 52) + (index * 6);
-    const c_top = isStackedItem ? -(index * simulatedOffset * 52) - (index * 6) : viewHeight - b_offset - 48; 
-    const c_left = isStackedItem ? 0 : (isMain ? windowSize.w - 88 : 40);
+    // CSS-driven positioning:
+    // Collapsed: index * 4 (slight overlap)
+    // Expanded: index * 58 (full spread)
+    const stackSpread = simulatedOffset;
+    const bottomValue = isMain ? 40 : 40 + (index * stackSpread * 52) + (index * 6);
+    
+    // We use bottom instead of top for stability and performance
+    const style: React.CSSProperties = isExpanded 
+      ? { 
+          position: 'fixed', 
+          top: 0, 
+          left: 0, 
+          width: '100%', 
+          height: '100%', 
+          borderRadius: 0, 
+          zIndex: 500,
+          transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)'
+        } 
+      : { 
+          position: 'fixed', 
+          bottom: `${bottomValue}px`, 
+          left: isMain ? 'auto' : '40px',
+          right: isMain ? '40px' : 'auto',
+          width: '48px', 
+          height: '48px', 
+          borderRadius: '0.75rem', 
+          zIndex: 100 - index,
+          transition: isDraggingDrawer ? 'none' : 'bottom 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.2s ease-out'
+        };
 
     return (
       <div 
-        style={isExpanded ? { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 0, zIndex: 500 } : { position: isStackedItem ? 'absolute' : 'fixed', top: `${c_top}px`, left: `${c_left}px`, width: '48px', height: '48px', borderRadius: '0.75rem', zIndex: 100 - index }} 
-        className={`shadow-2xl overflow-hidden ${!isDraggingDrawer || isMain ? 'transition-all duration-200' : ''} ${isExpanded ? 'bg-white/95 backdrop-blur-3xl' : `${data.color} cursor-pointer border-t border-white/20`} flex items-center justify-center text-white group`} 
+        style={style}
+        className={`shadow-2xl overflow-hidden ${isExpanded ? 'bg-white/95 backdrop-blur-3xl' : `${data.color} cursor-pointer border-t border-white/20`} flex items-center justify-center text-white group`} 
         onClick={(e) => { e.stopPropagation(); if (isExpanded) return; onOpen(isMain ? 'launcher' : (fId || null)); }}>
         
         {!isMain && !isExpanded && index === 0 && (
@@ -73,7 +97,7 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
           <SafeIcon name={data.icon} fill={isExpanded ? "none" : "currentColor"} size={ICON_SIZE} />
         </div>
         
-        <div className={`w-full h-full p-8 pt-32 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-8 content-start justify-items-center transition-all duration-200 ${isExpanded ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className={`w-full h-full p-8 pt-32 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-8 content-start justify-items-center transition-all duration-300 ${isExpanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
            { (isMain ? [{id:'studio', name:'Studio', icon:'LayoutTemplate'}, {id:'home', name:'Dashboard', icon:'Home'}] : (data.items || [])).map((item, i) => (
               <div key={i} className="flex flex-col items-center group cursor-pointer active:scale-95 transition-all" onClick={(e) => { e.stopPropagation(); if (isMain && onLaunch) onLaunch(item.id!); else if (onBirth) onBirth(item); }}>
                 <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-sm ${isMain ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 group-hover:bg-blue-600 group-hover:text-white'}`}>
@@ -85,8 +109,8 @@ export const AndroidFolder: React.FC<AndroidFolderProps> = ({
         </div>
 
         { !isMain && isExpanded && (
-             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 opacity-50 cursor-pointer" onClick={() => onOpen(null)}>
-                 <ChevronDown size={24} className="stroke-[3]" />
+             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 opacity-50 cursor-pointer" onClick={() => onOpen(null)}>
+                 <ChevronDown size={32} className="stroke-[3]" />
              </div>
         )}
       </div>
