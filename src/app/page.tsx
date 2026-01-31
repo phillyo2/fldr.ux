@@ -144,41 +144,43 @@ export default function App() {
       const dx = (dragNode.x || 0) - other.x; const dy = (dragNode.y || 0) - other.y;
       const adx = Math.abs(dx); const ady = Math.abs(dy);
       const isAdjacent = adx < (UNIT_SIZE_VAL + 5) && ady < (UNIT_SIZE_VAL + 5);
+      const isRecursion = isDescendantOf(other.instanceId, dId, connRef.current);
 
       let targetPort = null; let sourcePort = null;
       
       // GRID ADJACENCY LOGIC (Snap-to-Neighbor)
       if (isAdjacent) {
           if (adx < 5) { 
-              if (dy > 0) { // Drag node is below other
+              if (dy > 0) { // dragNode is below other
                   targetPort = 'top'; sourcePort = 'bottom'; 
-              } else { // Drag node is above other
+              } else { // dragNode is above other
                   targetPort = 'bottom'; sourcePort = 'top'; 
               }
           } else if (ady < 5) {
-              if (dx > 0) { // Drag node is to the right
+              if (dx > 0) { // dragNode is to the right
                   targetPort = 'left'; sourcePort = 'right'; 
-              } else { // Drag node is to the left
+              } else { // dragNode is to the left
                   targetPort = 'right'; sourcePort = 'left'; 
               }
           }
       } 
       // DISTAL TETHERING LOGIC (Always aim for Blue Input)
       else if (adx < DETECTION_RANGE && ady < DETECTION_RANGE) {
-          targetPort = 'top'; // Target Blue Input
-          // Determine best source port on 'other' to reach dragNode
+          targetPort = 'top'; 
           if (dy > adx) sourcePort = 'bottom';
           else if (dx > ady) sourcePort = 'right';
+          else if (dy < -adx) sourcePort = 'top';
           else sourcePort = 'left';
       }
 
+      // REFINEMENT RULES
+      if (!isAdjacent && targetPort) targetPort = 'top'; // Distal always targets Top Blue
+      if (isRecursion) {
+          if (targetPort && targetPort !== 'top') return; // Recursion MUST target Blue Top
+          targetPort = 'top';
+      }
+
       if (targetPort && sourcePort) {
-          // RECURSION RULE: Only allow circling back to Blue (Top)
-          const involvesLoop = isDescendantOf(other.instanceId, dId, connRef.current);
-          if (involvesLoop && targetPort !== 'top') return;
-          
-          // PREVENTION: Cannot connect to self (already handled by ID check)
-          
           const sourceLp = LATCH_POINTS.find(lp => lp.id === sourcePort);
           if (!sourceLp) return;
           
@@ -195,7 +197,7 @@ export default function App() {
 
     if (ghosts.length === 0) return [];
     
-    // Nearest Point Rule: Return only the closest single ghost handshake
+    // Nearest Point Rule
     ghosts.sort((a, b) => {
         const distA = Math.sqrt(Math.pow((a.snapX || 0) - (dragNode.x || 0), 2) + Math.pow((a.snapY || 0) - (dragNode.y || 0), 2));
         const distB = Math.sqrt(Math.pow((b.snapX || 0) - (dragNode.x || 0), 2) + Math.pow((b.snapY || 0) - (dragNode.y || 0), 2));
@@ -217,7 +219,7 @@ export default function App() {
     setIsDraggingDrawer(false);
     const start = offsetRef.current; 
     const startTime = performance.now();
-    const duration = 60; // Lightning fast snap
+    const duration = 60; 
     const step = (now: number) => {
       const p = Math.min((now - startTime) / duration, 1); 
       const easedP = p * (2 - p);
@@ -422,7 +424,7 @@ export default function App() {
   const handleLauncherNavigate = (pageId: string) => {
     setCurrentPageId(pageId);
     setActiveFolderView(null);
-    setSimulatedOffset(0); // Auto-collapse
+    animateTo(0);
   };
 
   return (
@@ -442,7 +444,6 @@ export default function App() {
              onContextMenu={(e) => e.preventDefault()}
              style={{ touchAction: 'none' }}>
             
-            {/* ENHANCED GRID: Lanes shifted 16, 16 to align with pathing lanes */}
             <div className="absolute inset-0 pointer-events-none opacity-100" 
                style={{ 
                    backgroundImage: `
@@ -473,10 +474,14 @@ export default function App() {
                     {connections.map(conn => {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
+
+                        // Stealth Connection: Hide path if adjacent
+                        const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
+                        if (isAdjacent) return null;
+
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         
-                        // Kinematic Routing Logic
                         let d = conn.waypoint 
                             ? `M ${sX} ${sY} L ${conn.waypoint.x} ${sY} L ${conn.waypoint.x} ${conn.waypoint.y} L ${tX} ${conn.waypoint.y} L ${tX} ${tY}` 
                             : getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.id);
@@ -487,12 +492,15 @@ export default function App() {
                     {activeTether && (() => {
                         const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === draggingId);
                         if (!s || !t) return null;
+                        
+                        const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
+                        if (isAdjacent) return null;
+
                         const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
-                        const tX = t.x + 16, tY = t.y - HEADER_OFFSET + 16;
+                        const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('blue') ? '#3B82F6' : '#FBBF24';
                         
-                        // Tether uses same kinematic path logic
-                        const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, 'top', 'tether');
+                        const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, 'tether');
                         return <path d={tetherPath} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
                     })()}
                 </svg>
@@ -511,10 +519,13 @@ export default function App() {
                   </div>
                 ))}
 
-                {/* Mid-point segments balls */}
+                {/* Segment Balls */}
                 {connections.map(conn => {
                     const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                     if(!s || !t) return null;
+                    const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
+                    if (isAdjacent) return null;
+
                     const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                     const midX = conn.waypoint ? conn.waypoint.x : (sX + tX) / 2, midY = conn.waypoint ? conn.waypoint.y : (sY + tY) / 2;
@@ -599,4 +610,3 @@ export default function App() {
     </div>
   );
 }
-
