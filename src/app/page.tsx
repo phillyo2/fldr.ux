@@ -67,15 +67,9 @@ export default function App() {
 
   const itemsRef = useRef(canvasItems);
   const connRef = useRef(connections);
-  useEffect(() => { 
-    itemsRef.current = canvasItems; 
-  }, [canvasItems]);
-  useEffect(() => { 
-    connRef.current = connections; 
-  }, [connections]);
-  useEffect(() => {
-    offsetRef.current = simulatedOffset;
-  }, [simulatedOffset]);
+  useEffect(() => { itemsRef.current = canvasItems; }, [canvasItems]);
+  useEffect(() => { connRef.current = connections; }, [connections]);
+  useEffect(() => { offsetRef.current = simulatedOffset; }, [simulatedOffset]);
 
   const lastTap = useRef(0);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -143,66 +137,54 @@ export default function App() {
 
       const dx = (dragNode.x || 0) - other.x; const dy = (dragNode.y || 0) - other.y;
       const adx = Math.abs(dx); const ady = Math.abs(dy);
-      const isAdjacent = adx < (UNIT_SIZE_VAL + 5) && ady < (UNIT_SIZE_VAL + 5);
+      
       const isRecursion = isDescendantOf(other.instanceId, dId, connRef.current);
+      
+      // Proximity check for revealing dots (Stage 1)
+      if (adx > DETECTION_RANGE || ady > DETECTION_RANGE) return;
 
       let targetPort = null; let sourcePort = null;
-      
-      // GRID ADJACENCY LOGIC (Snap-to-Neighbor)
-      if (isAdjacent) {
-          if (adx < 5) { 
-              if (dy > 0) { // dragNode is below other
-                  targetPort = 'top'; sourcePort = 'bottom'; 
-              } else { // dragNode is above other
-                  targetPort = 'bottom'; sourcePort = 'top'; 
-              }
-          } else if (ady < 5) {
-              if (dx > 0) { // dragNode is to the right
-                  targetPort = 'left'; sourcePort = 'right'; 
-              } else { // dragNode is to the left
-                  targetPort = 'right'; sourcePort = 'left'; 
-              }
-          }
-      } 
-      // DISTAL TETHERING LOGIC (Always aim for Blue Input)
-      else if (adx < DETECTION_RANGE && ady < DETECTION_RANGE) {
+      let color = 'bg-slate-300';
+
+      // Logic: Source determines color and port based on relative position
+      if (adx < SNAP_TOLERANCE) {
+          if (dy > 0) { targetPort = 'bottom'; sourcePort = 'top'; color = 'bg-emerald-500'; } // Success Flow
+          else { targetPort = 'top'; sourcePort = 'bottom'; color = 'bg-blue-500'; } // Generic Input
+      } else if (ady < SNAP_TOLERANCE) {
+          if (dx > 0) { targetPort = 'right'; sourcePort = 'left'; color = 'bg-rose-500'; } // Error Flow
+          else { targetPort = 'left'; sourcePort = 'right'; color = 'bg-amber-400'; } // Peek/Attach
+      }
+
+      // Recursion Rule: Force Blue Snap
+      if (isRecursion) {
           targetPort = 'top'; 
+          color = 'bg-blue-500';
+          // Determine which side of source we are exiting
           if (dy > adx) sourcePort = 'bottom';
           else if (dx > ady) sourcePort = 'right';
-          else if (dy < -adx) sourcePort = 'top';
           else sourcePort = 'left';
       }
 
-      // REFINEMENT RULES
-      if (!isAdjacent && targetPort) targetPort = 'top'; // Distal always targets Top Blue
-      if (isRecursion) {
-          if (targetPort && targetPort !== 'top') return; // Recursion MUST target Blue Top
-          targetPort = 'top';
-      }
-
       if (targetPort && sourcePort) {
-          const sourceLp = LATCH_POINTS.find(lp => lp.id === sourcePort);
-          if (!sourceLp) return;
-          
           const snapX = other.x + (targetPort === 'right' ? 32 : (targetPort === 'left' ? -32 : 0));
           const snapY = other.y + (targetPort === 'bottom' ? 32 : (targetPort === 'top' ? -32 : 0));
           
+          // Calculate distance between latch points for "Touching" (Stage 2)
+          const dotDist = Math.sqrt(Math.pow(snapX - dragNode.x, 2) + Math.pow(snapY - dragNode.y, 2));
+
           ghosts.push({ 
             id: 'ghost',
-            sourceId: other.instanceId, sourceSide: sourcePort, targetId: dId, targetSide: targetPort,
-            color: sourceLp.color, displayColor: 'bg-slate-300', snapX, snapY
-          });
+            sourceId: other.instanceId, sourceSide: targetPort, targetId: dId, targetSide: sourcePort,
+            color, displayColor: color, snapX, snapY,
+            dotDistance: dotDist // Custom field for tracking touching
+          } as any);
       }
     });
 
     if (ghosts.length === 0) return [];
     
     // Nearest Point Rule
-    ghosts.sort((a, b) => {
-        const distA = Math.sqrt(Math.pow((a.snapX || 0) - (dragNode.x || 0), 2) + Math.pow((a.snapY || 0) - (dragNode.y || 0), 2));
-        const distB = Math.sqrt(Math.pow((b.snapX || 0) - (dragNode.x || 0), 2) + Math.pow((b.snapY || 0) - (dragNode.y || 0), 2));
-        return distA - distB;
-    });
+    ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
     
     return [ghosts[0]];
   };
@@ -210,9 +192,8 @@ export default function App() {
   const handleSmartBirth = (item: Partial<CanvasItem>) => {
     const spawnX = -viewOffset.x + 32; 
     const spawnY = -viewOffset.y + 32 + HEADER_OFFSET;
-
     setCanvasItems(prev => [...prev, { ...item, instanceId: `inst_${Date.now()}`, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem]);
-    setActiveFolderView(null); setSimulatedOffset(0); 
+    setActiveFolderView(null); animateTo(0); 
   };
 
   const animateTo = (target: number) => {
@@ -239,13 +220,9 @@ export default function App() {
         if (exists) return prev;
         return {
             ...prev,
-            actions: {
-                ...prev.actions,
-                items: [...prev.actions.items, { ...dna }]
-            }
+            actions: { ...prev.actions, items: [...prev.actions.items, { ...dna }] }
         };
     });
-
     setIsStudioOpen(false); setEditingItem(null);
   };
 
@@ -312,17 +289,27 @@ export default function App() {
       const x = clientX - mouseOffset.current.x; const y = clientY - mouseOffset.current.y;
       setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x, y } : i));
       
+      const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
+      setGhostConnections(ghosts);
+
       if (!activeTether) {
-          const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
-          setGhostConnections(ghosts);
-          if (ghosts.length > 0) {
+          const best = ghosts[0] as any;
+          // Handshake logic: dots must be "touching" (dist < 12) for duration
+          if (best && best.dotDistance < 12) {
               if (!tetherTimer.current) {
                   tetherTimer.current = setTimeout(() => {
-                      if(ghosts[0]) { setActiveTether({ ...ghosts[0] }); setGhostConnections([]); }
+                      if(best) { setActiveTether({ ...best }); setGhostConnections([]); }
                   }, TETHER_DELAY);
               }
-          } else { if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; } }
-      } else { setGhostConnections([]); }
+          } else { 
+              if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; } 
+          }
+      } else { 
+          setGhostConnections([]); 
+          // Check if we pulled away
+          const distToSnap = Math.sqrt(Math.pow(activeTether.snapX! - x, 2) + Math.pow(activeTether.snapY! - y, 2));
+          if (distToSnap > 48) setActiveTether(null);
+      }
       setTrashActive(clientY > window.innerHeight - 100);
     };
 
@@ -341,6 +328,7 @@ export default function App() {
 
       const droppedItem = itemsRef.current.find(i => i.instanceId === draggingId);
       if (!droppedItem) return; 
+      
       const instantGhosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x: droppedItem.x, y: droppedItem.y });
       const bestSnap = instantGhosts[0]; 
 
@@ -355,7 +343,7 @@ export default function App() {
       });
 
       if (activeTether) { setConnections(prev => [...prev, { ...activeTether, id: `conn_${Date.now()}` }]); } 
-      else if (bestSnap) { setConnections(prev => [...prev, { ...bestSnap, id: `conn_${Date.now()}` }]); }
+      else if (bestSnap && (bestSnap as any).dotDistance < 12) { setConnections(prev => [...prev, { ...bestSnap, id: `conn_${Date.now()}` }]); }
       setActiveTether(null); setGhostConnections([]); setIsDragging(false); setDraggingId(null); setTrashActive(false);
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
@@ -394,31 +382,14 @@ export default function App() {
       }
     };
 
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove);
-    window.addEventListener('touchend', handleUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-      window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleUp);
-    };
+    window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
+    return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
   }, []);
 
   const handleOpenFolder = (fId: string) => {
-    if (offsetRef.current < 0.8) {
-        animateTo(1);
-    } else {
-        setActiveFolderView(fId);
-    }
-  };
-
-  const toggleStack = () => {
-    if (dragDistance.current < 10) {
-        if (offsetRef.current > 0.5) animateTo(0);
-        else animateTo(1);
-    }
+    if (offsetRef.current < 0.8) animateTo(1);
+    else setActiveFolderView(fId);
   };
 
   const handleLauncherNavigate = (pageId: string) => {
@@ -475,7 +446,7 @@ export default function App() {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
 
-                        // Stealth Connection: Hide path if adjacent
+                        // Stealth Connection: Hide path IF adjacent
                         const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
                         if (isAdjacent) return null;
 
@@ -539,26 +510,34 @@ export default function App() {
                 })}
 
                 {/* Latch points */}
-                {canvasItems.map(item => (
-                  <div key={`latch_group_${item.instanceId}`} className="absolute pointer-events-none z-[2000]" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                      {LATCH_POINTS.map(lp => {
-                        const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
-                        const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
-                        const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                        const isVisible = !!ghost || !!outgoingLink || !!incomingLink;
-                        const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : lp.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
-                        return (
-                          <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white cursor-pointer pointer-events-auto shadow-sm
-                                  ${outgoingLink || incomingLink ? c : 'bg-slate-300'}
-                                  ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
-                                  ${ghost ? 'ring-4 ring-slate-200 scale-150 animate-pulse' : ''}
-                                  hover:scale-150
-                              `} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} 
-                          />
-                        );
-                      })}
-                  </div>
-                ))}
+                {canvasItems.map(item => {
+                  const involvesRecursion = draggingId && isDescendantOf(item.instanceId, draggingId, connRef.current);
+                  return (
+                    <div key={`latch_group_${item.instanceId}`} className="absolute pointer-events-none z-[2000]" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                        {LATCH_POINTS.map(lp => {
+                          const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
+                          const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
+                          const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
+                          
+                          // Recursion logic: only 'top' blue is an attachment target
+                          const isInvalidRecursionPort = involvesRecursion && lp.id !== 'top';
+                          
+                          const isVisible = !!ghost || !!outgoingLink || !!incomingLink;
+                          const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : lp.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
+                          
+                          return (
+                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white cursor-pointer pointer-events-auto shadow-sm
+                                    ${outgoingLink || incomingLink ? c : 'bg-slate-300'}
+                                    ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
+                                    ${ghost ? (isInvalidRecursionPort ? 'bg-slate-400 opacity-50' : 'ring-4 ring-slate-200 scale-150 animate-pulse') : ''}
+                                    hover:scale-150
+                                `} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} 
+                            />
+                          );
+                        })}
+                    </div>
+                  );
+                })}
             </div>
           </div>
         ) : (
@@ -580,9 +559,8 @@ export default function App() {
         <AndroidFolder isMain={true} activeView={activeFolderView} onOpen={setActiveFolderView} onLaunch={handleLauncherNavigate} registry={foldersRegistry} windowSize={windowSize} simulatedOffset={simulatedOffset} />
         <div 
             className="fixed bottom-[40px] left-[40px] w-12 h-12 z-[100] cursor-pointer"
-            onMouseDown={handleDrawerPointerDown}
-            onTouchStart={handleDrawerPointerDown}
-            onClick={toggleStack}
+            onMouseDown={handleDrawerPointerDown} onTouchStart={handleDrawerPointerDown}
+            onClick={() => dragDistance.current < 10 && (simulatedOffset > 0.5 ? animateTo(0) : animateTo(1))}
         >
             {['actions', 'triggers', 'logic'].map((f, i) => (
                 <AndroidFolder key={f} fId={f} index={i} registry={foldersRegistry} activeView={activeFolderView} onOpen={handleOpenFolder} onBirth={handleSmartBirth} windowSize={windowSize} simulatedOffset={simulatedOffset} isStackedItem isDraggingDrawer={isDraggingDrawer} />

@@ -4,7 +4,7 @@ import { LatchPoint } from './types';
 export const GRID_SIZE = 32;
 export const UNIT_SIZE_VAL = 32; 
 export const SNAP_TOLERANCE = 32; 
-export const DETECTION_RANGE = 96; 
+export const DETECTION_RANGE = 128; // Dots appear sooner
 export const TETHER_DELAY = 600; 
 export const HEADER_OFFSET = 56;
 export const ICON_SIZE = 24; 
