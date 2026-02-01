@@ -101,7 +101,7 @@ export default function App() {
     setIsReady(true);
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
-    return () => window.removeResizeListener && window.removeEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const deleteConnection = (id: string) => {
@@ -134,6 +134,10 @@ export default function App() {
     if (!dragNode) return ghosts;
 
     const dragCtx = getTreeContext(dId, connRef.current);
+    const fuchsiaProviders = new Set(connRef.current.filter(c => c.color.includes('fuchsia')).map(c => c.sourceId));
+
+    // Locked tile: cannot latch to others if already serving as a data provider
+    if (fuchsiaProviders.has(dId)) return ghosts;
 
     const getPortPos = (item: any, side: string) => {
       if (side === 'top') return { x: item.x + 16, y: item.y };
@@ -145,6 +149,10 @@ export default function App() {
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
+      
+      // Locked tile: cannot have tiles latched to it if already serving as a data provider
+      if (fuchsiaProviders.has(other.instanceId)) return;
+
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
 
       LATCH_POINTS.forEach(lSource => {
@@ -196,7 +204,6 @@ export default function App() {
         const newItems = prev.map(item => ({ ...item }));
         const visited = new Set<string>();
         const occupied = new Set<string>();
-
         const getPosKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
 
         const findSafePosition = (startX: number, startY: number, stepX: number, stepY: number) => {
@@ -211,8 +218,7 @@ export default function App() {
         };
 
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
-        // Roots are only nodes with no incoming connections. 
-        // Fuchsia providers to the entry point will naturally be roots.
+        // Unified root logic: if it has an incoming connection, it's not a root, even origin.
         const roots = newItems.filter(i => !incomingTargetIds.has(i.instanceId));
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
@@ -220,16 +226,12 @@ export default function App() {
             occupied.add(getPosKey(cx, cy));
             
             const node = newItems.find(i => i.instanceId === nodeId);
-            if (node) {
-              node.x = cx;
-              node.y = cy;
-            }
+            if (node) { node.x = cx; node.y = cy; }
 
             const outgoing = connections.filter(c => c.sourceId === nodeId);
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                // Reduced tether distance (1.5x grid)
                 const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
                 let tx = cx, ty = cy;
 
@@ -238,16 +240,12 @@ export default function App() {
                 else if (conn.sourceSide === 'left') tx -= step;
                 else if (conn.sourceSide === 'top') ty -= step;
 
-                // Extra buffer for recursive lines
-                if (isAncestor(conn.targetId, nodeId, connections)) {
-                  ty += step * 2;
-                }
+                // Recursive/Ancestor avoidance logic
+                if (isAncestor(conn.targetId, nodeId, connections)) ty += step * 2;
 
                 const { tx: finalX, ty: finalY } = findSafePosition(
-                    snapToGrid(tx, 0), 
-                    snapToGrid(ty, HEADER_OFFSET), 
-                    0, 
-                    GRID_SIZE
+                    snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), 
+                    0, GRID_SIZE
                 );
 
                 processNode(conn.targetId, finalX, finalY);
@@ -255,9 +253,8 @@ export default function App() {
         };
 
         const centerX = snapToGrid(windowSize.w / 2 - 16, 0);
-        let startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
+        let startY = snapToGrid(windowSize.h * 0.3, HEADER_OFFSET);
 
-        // Sort roots to prioritize the main tree containing the Origin
         const sortedRoots = [...roots].sort((a, b) => {
           const aLeadsToOrigin = a.isOrigin || isAncestor(a.instanceId, 'entry_origin', connections);
           const bLeadsToOrigin = b.isOrigin || isAncestor(b.instanceId, 'entry_origin', connections);
@@ -413,10 +410,8 @@ export default function App() {
                           
                           const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
                           const isFuchsia = conn.color.includes('fuchsia');
-                          const isEmerald = conn.color.includes('emerald');
-                          const isRose = conn.color.includes('rose');
+                          const isPersistent = isFuchsia || conn.color.includes('emerald') || conn.color.includes('rose');
                           
-                          const isPersistent = isFuchsia || isEmerald || isRose;
                           if (!isPersistent && dist < 48) return null;
 
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems, connections);
@@ -473,53 +468,7 @@ export default function App() {
                               const activeIsFuchsia = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia');
                               dotColor = (isFuchsia || activeIsFuchsia) ? 'bg-fuchsia-500' : 'bg-blue-500'; 
                             }
-
                             opacityClass = 'opacity-100 scale-100';
-
-                            const connection = connectedAsSource || connectedAsTarget || (tethered ? activeTether : null);
-                            if (connection) {
-                              const isTargetPort = (connection.targetId === item.instanceId && connection.targetSide === lp.id);
-                              const isFuchsia = connection.color.includes('fuchsia');
-
-                              if (isTargetPort) {
-                                const otherId = connection.sourceId;
-                                const otherSide = connection.sourceSide;
-                                const otherItem = canvasItems.find(i => i.instanceId === otherId);
-                                const otherLp = LATCH_POINTS.find(p => p.id === otherSide);
-
-                                if (otherItem && otherLp) {
-                                  const myX = item.x + lp.x * 32;
-                                  const myY = item.y + lp.y * 32;
-                                  const itsX = otherItem.x + otherLp.x * 32;
-                                  const itsY = otherItem.y + otherLp.y * 32;
-                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(itsX - myX, 2));
-
-                                  if (dist < 24 && !isFuchsia) {
-                                    opacityClass = 'opacity-0 scale-50';
-                                  }
-                                }
-                              } else {
-                                const otherId = connection.targetId;
-                                const otherSide = connection.targetSide;
-                                const otherItem = canvasItems.find(i => i.instanceId === otherId);
-                                const otherLp = LATCH_POINTS.find(p => p.id === otherSide);
-
-                                if (otherItem && otherLp) {
-                                  const myX = item.x + lp.x * 32;
-                                  const myY = item.y + lp.y * 32;
-                                  const itsX = otherItem.x + otherLp.x * 32;
-                                  const itsY = otherItem.y + otherLp.y * 32;
-                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(itsX - myX, 2));
-
-                                  const hasIncomingFlow = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top');
-                                  const isIsolatedInput = item.isOrigin || !hasIncomingFlow;
-
-                                  if (dist < 24 && lp.id === 'bottom' && isIsolatedInput) {
-                                    opacityClass = 'opacity-0 scale-50';
-                                  }
-                                }
-                              }
-                            }
                           }
                           return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
                         })}
