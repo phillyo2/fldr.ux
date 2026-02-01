@@ -504,24 +504,24 @@ export default function App() {
         </div>
       </main>
 
-      {/* Grid-Locked Command Cluster (Top Right) */}
-      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-2">
-         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><LayoutGrid size={20} className="text-slate-600" /></div>
-         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><Waypoints size={20} className="text-slate-600" /></div>
+      {/* Grid-Snapped Command Cluster (Top Right) */}
+      <div className="fixed top-8 right-8 z-[1000] flex flex-col border border-slate-200 rounded-md overflow-hidden shadow-sm">
+         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border-b border-slate-200 last:border-0"><LayoutGrid size={20} className="text-slate-600" /></div>
+         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95"><Waypoints size={20} className="text-slate-600" /></div>
       </div>
 
-      {/* Grid-Locked Zoom Cluster (Center Right) */}
-      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col gap-2">
-         <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><Plus size={20} className="text-slate-700" /></button>
-         <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><Minus size={20} className="text-slate-700" /></button>
+      {/* Grid-Snapped Zoom Cluster (Center Right) */}
+      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col border border-slate-200 rounded-md overflow-hidden shadow-sm">
+         <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border-b border-slate-200"><Plus size={20} className="text-slate-700" /></button>
+         <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95"><Minus size={20} className="text-slate-700" /></button>
       </div>
 
-      {/* Grid-Locked Toolbox Access (Bottom Left) */}
+      {/* Grid-Snapped Toolbox Access (Bottom Left) */}
       <div className="fixed bottom-8 left-8 z-[500]">
          <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800"><Folder size={20} className="text-white" /></div>
       </div>
       
-      {/* Grid-Locked Navigator Access (Bottom Right) */}
+      {/* Grid-Snapped Navigator Access (Bottom Right) */}
       <div className="fixed bottom-8 right-8 z-[500]">
         <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700"><Compass size={20} className="text-white" /></div>
       </div>
