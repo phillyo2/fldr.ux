@@ -224,7 +224,6 @@ export default function App() {
             return false;
         };
 
-        // 1. Organize Modifiers into a Top Grid
         const modifiers = newItems.filter(i => !i.isOrigin && !connections.some(c => c.sourceId === i.instanceId || c.targetId === i.instanceId));
         const modCols = 4;
         modifiers.forEach((mod, idx) => {
@@ -236,22 +235,16 @@ export default function App() {
             occupied.add(`${mod.x},${mod.y}`);
         });
 
-        // 2. Find Islands (Connected Components)
         const roots = newItems.filter(i => {
             if (visited.has(i.instanceId)) return false;
             if (i.isOrigin) return true;
-            
-            // Exclude fuchsia sources from being roots; they are processed by their targets
             const isFuchsiaSource = connections.some(c => c.sourceId === i.instanceId && c.color.includes('fuchsia'));
             if (isFuchsiaSource) return false;
-
-            // A root has no incoming standard flow connections
             const incomingFlow = connections.some(c => c.targetId === i.instanceId && !c.color.includes('fuchsia'));
             return !incomingFlow;
         });
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
-            // Fuchsia (Isolated Inputs) - Place 1 cell block above target
             const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
             incomingFuchsia.forEach(conn => {
                 if (visited.has(conn.sourceId)) return;
@@ -265,25 +258,18 @@ export default function App() {
                 }
             });
 
-            // Standard Flow Directions
             const outgoing = connections.filter(c => c.sourceId === nodeId && !c.color.includes('fuchsia'));
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
-
                 let tx = cx, ty = cy;
                 const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
-
                 if (conn.sourceSide === 'bottom') ty += step;
                 else if (conn.sourceSide === 'right') tx += step;
                 else if (conn.sourceSide === 'left') tx -= step;
                 else if (conn.sourceSide === 'top') ty -= step;
 
-                // Overlap Avoidance
                 let safety = 0;
-                while (isPositionOccupied(tx, ty) && safety < 10) {
-                    tx += GRID_SIZE;
-                    safety++;
-                }
+                while (isPositionOccupied(tx, ty) && safety < 10) { tx += GRID_SIZE; safety++; }
 
                 const target = newItems.find(i => i.instanceId === conn.targetId);
                 if (target) {
@@ -294,26 +280,22 @@ export default function App() {
             });
         };
 
-        // 3. Layout Islands
         let islandOffsetY = 0;
         roots.forEach((root, idx) => {
             let startX = root.isOrigin ? snapToGrid(windowSize.w / 2 - 16, 0) : snapToGrid(128 + idx * 256, 0);
             let startY = root.isOrigin ? snapToGrid(windowSize.h * 0.4, HEADER_OFFSET) : snapToGrid(windowSize.h * 0.6 + islandOffsetY, HEADER_OFFSET);
-            
             root.x = startX; root.y = startY;
             visited.add(root.instanceId); occupied.add(`${startX},${startY}`);
             processNode(root.instanceId, startX, startY);
             islandOffsetY += 128;
         });
 
-        // 4. Centering View
         const origin = newItems.find(i => i.isOrigin);
         if (origin) {
             const vx = - (origin.x - (windowSize.w / 2) + 16);
             const vy = - (origin.y - (windowSize.h / 2) + 16);
             setViewOffset({ x: vx, y: vy });
         }
-
         return newItems;
     });
   };
@@ -392,25 +374,10 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
-        const currentActiveGhost = ghosts.find((g: any) => 
-          g.sourceId === activeTether.sourceId && 
-          g.targetId === activeTether.targetId &&
-          g.sourceSide === activeTether.sourceSide &&
-          g.targetSide === activeTether.targetSide
-        ) as any;
-
-        if (!currentActiveGhost && best) {
+        // Persistence Protocol: If a new candidate is found, switch to it. 
+        // Otherwise, never disappear until set down.
+        if (best) {
           setActiveTether({ ...best });
-        } else if (!currentActiveGhost && !best) {
-          const dragNode = itemsRef.current.find(i => i.instanceId === draggingId);
-          if (dragNode) {
-            const otherId = draggingId === activeTether.sourceId ? activeTether.targetId : activeTether.sourceId;
-            const other = itemsRef.current.find(i => i.instanceId === otherId);
-            if (other) {
-              const d = Math.sqrt(Math.pow(dragNode.x - other.x, 2) + Math.pow(dragNode.y - other.y, 2));
-              if (d > DETECTION_RANGE) setActiveTether(null);
-            }
-          }
         }
       }
     };
@@ -429,25 +396,8 @@ export default function App() {
       
       setCanvasItems(prev => {
         const item = prev.find(i => i.instanceId === draggingId); if (!item) return prev;
+        // Strict Global Grid Snap: Drops exactly where release happened, no relative snap-back
         let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
-        
-        if (activeTether) {
-          const target = prev.find(i => i.instanceId === activeTether.targetId);
-          const source = prev.find(i => i.instanceId === activeTether.sourceId);
-          if (target && source) {
-             if (draggingId === activeTether.sourceId) {
-                if (activeTether.sourceSide === 'bottom' && activeTether.targetSide === 'top') { finalX = target.x; finalY = target.y - GRID_SIZE; }
-                else if (activeTether.sourceSide === 'right' && activeTether.targetSide === 'left') { finalX = target.x - GRID_SIZE; finalY = target.y; }
-                else if (activeTether.sourceSide === 'left' && activeTether.targetSide === 'right') { finalX = target.x + GRID_SIZE; finalY = target.y; }
-                else if (activeTether.sourceSide === 'top' && activeTether.targetSide === 'bottom') { finalX = target.x; finalY = target.y + GRID_SIZE; }
-             } else {
-                if (activeTether.targetSide === 'top' && activeTether.sourceSide === 'bottom') { finalX = source.x; finalY = source.y + GRID_SIZE; }
-                else if (activeTether.targetSide === 'left' && activeTether.sourceSide === 'right') { finalX = source.x + GRID_SIZE; finalY = source.y; }
-                else if (activeTether.targetSide === 'right' && activeTether.sourceSide === 'left') { finalX = source.x - GRID_SIZE; finalY = source.y; }
-                else if (activeTether.targetSide === 'bottom' && activeTether.sourceSide === 'top') { finalX = source.x; finalY = source.y - GRID_SIZE; }
-             }
-          }
-        }
         return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
       });
 
@@ -482,13 +432,11 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
-                          
                           let strokeColor = '#3B82F6'; 
                           if (conn.color.includes('emerald')) strokeColor = '#10B981';
                           else if (conn.color.includes('rose')) strokeColor = '#F43F5E';
                           else if (conn.color.includes('amber')) strokeColor = '#FBBF24';
                           else if (conn.color.includes('fuchsia')) strokeColor = '#D946EF';
-
                           return (
                             <React.Fragment key={conn.id}>
                               <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeLinecap="round" />
@@ -507,13 +455,11 @@ export default function App() {
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
-                          
                           let strokeColor = '#3B82F6';
                           if (activeTether.color.includes('emerald')) strokeColor = '#10B981';
                           else if (activeTether.color.includes('rose')) strokeColor = '#F43F5E';
                           else if (activeTether.color.includes('amber')) strokeColor = '#FBBF24';
                           else if (activeTether.color.includes('fuchsia')) strokeColor = '#D946EF';
-
                           return <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeDasharray={`${6/zoom},${4/zoom}`} className="opacity-50" />;
                       })()}
                   </svg>
@@ -522,15 +468,12 @@ export default function App() {
                       className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                       <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
                         {item.isOrigin ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />}
-                        
                         {LATCH_POINTS.map(lp => {
                           const connectedAsSource = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const connectedAsTarget = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           const tethered = activeTether && ((activeTether.sourceId === item.instanceId && activeTether.sourceSide === lp.id) || (activeTether.targetId === item.instanceId && activeTether.targetSide === lp.id));
-                          
                           let dotColor = 'bg-slate-200';
                           let opacityClass = 'opacity-0 scale-50';
-
                           if (connectedAsSource || connectedAsTarget || tethered) {
                             opacityClass = 'opacity-100 scale-100';
                             if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
@@ -542,10 +485,7 @@ export default function App() {
                               dotColor = (isFuchsia || activeIsFuchsia) ? 'bg-fuchsia-500' : 'bg-blue-500'; 
                             }
                           }
-                          
-                          return (
-                            <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />
-                          );
+                          return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
                         })}
                       </div>
                     </div>
