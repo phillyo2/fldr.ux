@@ -261,20 +261,24 @@ export default function App() {
             const outgoing = connections.filter(c => c.sourceId === nodeId && !c.color.includes('fuchsia'));
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
-                let tx = cx, ty = cy;
                 
-                // SIMPLIFIED UNSNAP: Tiles with blue lines attached detach from their parent.
-                // Any flow that isn't emerald, rose, amber, or fuchsia is treated as standard blue flow.
-                const isBlueLine = !conn.color.includes('emerald') && 
-                                  !conn.color.includes('rose') && 
-                                  !conn.color.includes('amber') &&
-                                  !conn.color.includes('fuchsia');
-                
+                // Identify recursion nodes: tiles that have a blue output line back to an ancestor.
+                const isPerformingRecursion = connections.some(c => 
+                  c.sourceId === conn.targetId && 
+                  !c.color.includes('emerald') && 
+                  !c.color.includes('rose') && 
+                  !c.color.includes('amber') &&
+                  !c.color.includes('fuchsia') &&
+                  isAncestor(c.targetId, conn.targetId, connections)
+                );
+
                 let step = GRID_SIZE;
-                if (mode === 'tether' || (mode === 'grid' && isBlueLine)) {
+                // Unsnap (64px stride) if we are in tether mode OR if this node is performing recursion.
+                if (mode === 'tether' || (mode === 'grid' && isPerformingRecursion)) {
                     step = GRID_SIZE * 2; 
                 }
 
+                let tx = cx, ty = cy;
                 if (conn.sourceSide === 'bottom') ty += step;
                 else if (conn.sourceSide === 'right') tx += step;
                 else if (conn.sourceSide === 'left') tx -= step;
