@@ -11,7 +11,7 @@ import {
   HEADER_OFFSET, SNAP_TOLERANCE, DETECTION_RANGE, 
   DRAG_THRESHOLD, LONG_PRESS_MS, LATCH_POINTS, GRID_SIZE 
 } from '@/lib/constants';
-import { getSmartPath, snapToGrid } from '@/lib/pathing';
+import { getSmartPath, snapToGrid, isAncestor } from '@/lib/pathing';
 import { calculateGhostHandshakes, getPortState, getTreeContext } from '@/lib/handshake-engine';
 
 export default function App() {
@@ -112,8 +112,9 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
-  const gatherLayout = (itemsOverride?: CanvasItem[]) => {
+  const gatherLayout = (itemsOverride?: CanvasItem[], modeOverride?: 'grid' | 'tether') => {
     setIsTransitioning(true);
+    const mode = modeOverride || layoutMode;
     const targetItems = itemsOverride || canvasItems;
 
     setCanvasItems(prev => {
@@ -176,7 +177,16 @@ export default function App() {
                 const outgoing = connections.filter(c => c.sourceId === nodeId);
                 outgoing.forEach(conn => {
                     if (visited.has(conn.targetId)) return;
-                    const step = GRID_SIZE * 2;
+                    
+                    // Mode-based spacing
+                    let step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+                    
+                    // RULE: Recursive connections (Blue) NEVER snap adjacent
+                    const isRecursive = conn.color.includes('blue') || isAncestor(conn.targetId, conn.sourceId, connections);
+                    if (isRecursive) {
+                      step = GRID_SIZE * 2; 
+                    }
+
                     let tx = cx, ty = cy;
                     if (conn.sourceSide === 'bottom') ty += step;
                     else if (conn.sourceSide === 'right') tx += step;
@@ -192,7 +202,7 @@ export default function App() {
             currentFlowX = snapToGrid(maxNodeXForThisTree + GRID_SIZE * 4, 0);
         });
 
-        // Camera Pan
+        // Camera Pan to Origin
         const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
         if (origin) {
             const targetVX = windowSize.w / 2 - (origin.x + 16) * zoom;
@@ -226,10 +236,9 @@ export default function App() {
       return;
     }
 
-    // Standard Logic Spawning (Nearby Anchor, No Gather)
+    // Standard Logic Spawning (Nearby Anchor)
     let spawnX = screenCenterX;
     let spawnY = screenCenterY;
-    const treeCtxs = new Set(canvasItems.map(i => getTreeContext(i.instanceId, connections)).filter(Boolean));
     
     const candidates: {x: number, y: number, dist: number}[] = [];
     canvasItems.forEach(i => {
@@ -421,8 +430,17 @@ export default function App() {
           </div>
         </div>
       </main>
-      <div onClick={() => gatherLayout()} className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><LayoutGrid size={20} className="text-slate-600" /></div>
-      <div onClick={() => setLayoutMode(m => m === 'grid' ? 'tether' : 'grid')} className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Waypoints size={20} className="text-slate-600" /></div>
+      
+      {/* Layout Controls */}
+      <div className="fixed top-[28px] right-[28px] z-[1000] flex flex-col gap-2">
+        <div onClick={() => { setLayoutMode('grid'); gatherLayout(undefined, 'grid'); }} className={`w-[32px] h-[32px] flex items-center justify-center cursor-pointer border rounded-md shadow-sm transition-all ${layoutMode === 'grid' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`} title="Crossword Gather (Adjacent)">
+          <LayoutGrid size={20} />
+        </div>
+        <div onClick={() => { setLayoutMode('tether'); gatherLayout(undefined, 'tether'); }} className={`w-[32px] h-[32px] flex items-center justify-center cursor-pointer border rounded-md shadow-sm transition-all ${layoutMode === 'tether' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`} title="Tether Gather (Spaced)">
+          <Waypoints size={20} />
+        </div>
+      </div>
+
       <div onClick={() => setZoom(prev => Math.min(2, prev + 0.1))} className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Plus size={20} className="text-slate-700" /></div>
       <div onClick={() => setZoom(prev => Math.max(0.5, prev - 0.1))} className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Minus size={20} className="text-slate-700" /></div>
       
