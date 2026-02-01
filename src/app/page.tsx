@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { LayoutGrid, Waypoints, Folder, Plus, Minus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft, LayoutTemplate, Home, Shuffle, Shield, Activity, Globe, Bell, Send, Cpu, Layers, Clock, HardDrive, GitBranch, Timer, Repeat } from 'lucide-react';
+import { LayoutGrid, Waypoints, Folder, Plus, Minus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft, LayoutTemplate, Home, Shuffle, Shield, Activity, Globe, Bell, Send, Cpu, Layers, Clock, HardDrive, GitBranch, Timer, Repeat, X } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
-import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
   CanvasItem, Connection, FolderData, FolderItem 
 } from '@/lib/types';
@@ -11,7 +10,7 @@ import {
   HEADER_OFFSET, SNAP_TOLERANCE, DETECTION_RANGE, 
   DRAG_THRESHOLD, LONG_PRESS_MS, LATCH_POINTS, GRID_SIZE 
 } from '@/lib/constants';
-import { getSmartPath, snapToGrid, isAncestor } from '@/lib/pathing';
+import { getSmartPath, snapToGrid } from '@/lib/pathing';
 import { calculateGhostHandshakes, getPortState } from '@/lib/handshake-engine';
 
 export default function App() {
@@ -114,7 +113,6 @@ export default function App() {
   const gatherLayout = (mode: 'grid' | 'tether') => {
     setLayoutMode(mode);
     setIsTransitioning(true);
-
     setCanvasItems(prev => {
         const newItems = prev.map(item => ({ ...item }));
         const visited = new Set<string>();
@@ -125,9 +123,7 @@ export default function App() {
             let tx = startX, ty = startY;
             let safety = 0;
             while (occupied.has(getPosKey(tx, ty)) && safety < 1000) {
-                tx += stepX;
-                ty += stepY;
-                safety++;
+                tx += stepX; ty += stepY; safety++;
             }
             return { tx, ty };
         };
@@ -152,18 +148,12 @@ export default function App() {
 
         let currentFlowX = snapToGrid(windowSize.w / 2 - 16, 0);
         const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
-
-        const sortedRoots = [...roots].sort((a, b) => {
-          if (a.isOrigin) return -1;
-          if (b.isOrigin) return 1;
-          return 0;
-        });
+        const sortedRoots = [...roots].sort((a, b) => (a.isOrigin ? -1 : (b.isOrigin ? 1 : 0)));
 
         sortedRoots.forEach((root) => {
             let maxNodeX = currentFlowX;
             const processNode = (nodeId: string, cx: number, cy: number) => {
-                visited.add(nodeId);
-                occupied.add(getPosKey(cx, cy));
+                visited.add(nodeId); occupied.add(getPosKey(cx, cy));
                 maxNodeX = Math.max(maxNodeX, cx);
                 const node = newItems.find(i => i.instanceId === nodeId);
                 if (node) { node.x = cx; node.y = cy; }
@@ -192,50 +182,24 @@ export default function App() {
         }
         return newItems;
     });
-
     setTimeout(() => setIsTransitioning(false), 600);
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
-    let bestAnchorPos = { x: screenCenterX, y: screenCenterY };
-    let minDist = Infinity;
-    canvasItems.forEach(node => {
-      const bX = node.x + 16; const bY = node.y + 32;
-      const dBottom = Math.sqrt(Math.pow(bX - screenCenterX, 2) + Math.pow(bY - screenCenterY, 2));
-      if (dBottom < minDist) { minDist = dBottom; bestAnchorPos = { x: bX, y: bY }; }
-      const rX = node.x + 32; const rY = node.y + 16;
-      const dRight = Math.sqrt(Math.pow(rX - screenCenterX, 2) + Math.pow(rY - screenCenterY, 2));
-      if (dRight < minDist) { minDist = dRight; bestAnchorPos = { x: rX, y: rY }; }
-    });
-    let spawnX = snapToGrid(bestAnchorPos.x - 16, 0);
-    let spawnY = snapToGrid(bestAnchorPos.y + GRID_SIZE, HEADER_OFFSET);
-    const occupied = new Set(canvasItems.map(i => `${Math.round(i.x)},${Math.round(i.y)}`));
-    let safety = 0;
-    while (occupied.has(`${Math.round(spawnX)},${Math.round(spawnY)}`) && safety < 10) { spawnY += GRID_SIZE; safety++; }
+    let spawnX = snapToGrid(screenCenterX - 16, 0);
+    let spawnY = snapToGrid(screenCenterY - 16, HEADER_OFFSET);
     const newInstanceId = `inst_${Date.now()}`;
     const newItem = { ...item, instanceId: newInstanceId, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem;
     setCanvasItems(prev => [...prev, newItem]);
-    const margin = 150;
-    const screenSpawnX = spawnX * zoom + viewOffset.x;
-    const screenSpawnY = (spawnY - HEADER_OFFSET) * zoom + viewOffset.y;
-    if (screenSpawnX < margin || screenSpawnX > windowSize.w - margin || screenSpawnY < margin || screenSpawnY > windowSize.h - margin) {
-      const targetVX = windowSize.w / 2 - (spawnX + 16) * zoom;
-      const targetVY = windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom;
-      setIsTransitioning(true);
-      setViewOffset(prev => ({ x: prev.x + (targetVX - prev.x) * 0.6, y: prev.y + (targetVY - prev.y) * 0.6 }));
-      setTimeout(() => setIsTransitioning(false), 500);
-    }
     setActiveFolderView(null);
   };
 
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
     const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
-    setIsPanning(true); 
-    panStart.current = { x: clientX, y: clientY }; 
-    panOffsetStart.current = { ...viewOffset };
+    setIsPanning(true); panStart.current = { x: clientX, y: clientY }; panOffsetStart.current = { ...viewOffset };
   };
 
   const handleItemPointerDown = (e: React.MouseEvent | React.TouchEvent, item: CanvasItem) => {
@@ -257,11 +221,6 @@ export default function App() {
         }
       }
     }
-  };
-
-  const handleFolderSelect = (item: FolderItem) => {
-    if (item.id) { setCurrentPageId(item.id); setActiveFolderView(null); } 
-    else { handleSmartBirth(item); setActiveFolderView(null); }
   };
 
   const handleZoomIn = () => setZoom(prev => Math.min(2, prev + 0.1));
@@ -288,29 +247,50 @@ export default function App() {
       const best = ghosts[0] as any;
       if (best && (activeTether || best.dotDistance < SNAP_TOLERANCE)) { setActiveTether({ ...best }); }
     };
-
     const handleUp = (e: MouseEvent | TouchEvent) => {
       setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
       if (isPanning) { setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); setIsPanning(false); return; }
       if (!isDragging) return; 
-      setCanvasItems(prev => {
-        const item = prev.find(i => i.instanceId === draggingId); if (!item) return prev;
-        let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
-        return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
-      });
-      if (activeTether) { 
-        setConnections(prev => {
-          const exists = prev.find(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide);
-          if (exists) return prev;
-          return [...prev, { ...activeTether, id: `conn_${Date.now()}` }];
-        }); 
-      } 
+      setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x: snapToGrid(i.x, 0), y: snapToGrid(i.y, HEADER_OFFSET) } : i));
+      if (activeTether) { setConnections(prev => prev.some(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide) ? prev : [...prev, { ...activeTether, id: `conn_${Date.now()}` }]); }
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove); window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
+    window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
-  }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, currentPageId, zoom, windowSize]); 
+  }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, zoom]);
+
+  // --- INTERNAL COMPACT FOLDER VIEW ---
+  const CompactFolderView = ({ data, side, isOpen, onClose }: { data: FolderData, side: 'left' | 'right', isOpen: boolean, onClose: () => void }) => {
+    const [path, setPath] = useState<FolderItem[]>([]);
+    if (!isOpen) return null;
+    const currentItems = path.length > 0 ? path[path.length - 1].items || [] : data.items;
+    const currentTitle = path.length > 0 ? path[path.length - 1].name : data.title;
+
+    return (
+      <div className={`fixed bottom-[68px] ${side === 'left' ? 'left-[28px]' : 'right-[28px]'} z-[600] w-64 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-bottom-2 duration-200`}>
+        <div className={`${data.color} p-3 text-white flex items-center justify-between`}>
+          <div className="flex items-center gap-2">
+            {path.length > 0 && <button onClick={() => setPath(p => p.slice(0, -1))} className="hover:bg-white/10 p-1 rounded-full"><ChevronLeft size={14}/></button>}
+            <SafeIcon name={path.length > 0 ? (path[path.length-1].icon || 'Folder') : data.icon} size={14} />
+            <span className="text-[10px] font-black uppercase tracking-widest">{currentTitle}</span>
+          </div>
+          <button onClick={onClose} className="hover:bg-white/10 p-1 rounded-full"><X size={14}/></button>
+        </div>
+        <div className="p-3 bg-slate-50 grid grid-cols-3 gap-3">
+          {currentItems.map((item, i) => (
+            <div key={i} onClick={() => item.isFolder ? setPath(p => [...p, item]) : (item.id ? setCurrentPageId(item.id) : handleSmartBirth(item))} className="flex flex-col items-center gap-1 cursor-pointer group">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center border transition-all ${item.isFolder ? 'bg-slate-100 border-slate-200 text-slate-400' : 'bg-white border-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white shadow-sm'}`}>
+                <SafeIcon name={item.icon || (item.isFolder ? 'Folder' : 'Zap')} size={16} />
+              </div>
+              <span className="text-[8px] font-bold uppercase text-slate-400 group-hover:text-slate-900 truncate w-full text-center">{item.name}</span>
+            </div>
+          ))}
+          {currentItems.length === 0 && <div className="col-span-3 text-center py-4 text-[8px] text-slate-300 font-bold uppercase italic">Empty</div>}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="relative w-full h-screen bg-white overflow-hidden select-none font-sans">
@@ -326,16 +306,8 @@ export default function App() {
                           if(!s || !t) return null;
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                          const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
-                          const isFuchsia = conn.color.includes('fuchsia');
-                          const isPersistent = isFuchsia || conn.color.includes('emerald') || conn.color.includes('rose');
-                          if (!isPersistent && dist < 48) return null;
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems, connections);
-                          let strokeColor = '#3B82F6'; 
-                          if (conn.color.includes('emerald')) strokeColor = '#10B981';
-                          else if (conn.color.includes('rose')) strokeColor = '#F43F5E';
-                          else if (conn.color.includes('amber')) strokeColor = '#FBBF24';
-                          else if (conn.color.includes('fuchsia')) strokeColor = '#D946EF';
+                          let strokeColor = conn.color.includes('emerald') ? '#10B981' : (conn.color.includes('rose') ? '#F43F5E' : (conn.color.includes('amber') ? '#FBBF24' : (conn.color.includes('fuchsia') ? '#D946EF' : '#3B82F6')));
                           return (
                             <React.Fragment key={conn.id}>
                               <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeLinecap="round" />
@@ -349,11 +321,7 @@ export default function App() {
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems, connections);
-                          let strokeColor = '#3B82F6';
-                          if (activeTether.color.includes('emerald')) strokeColor = '#10B981';
-                          else if (activeTether.color.includes('rose')) strokeColor = '#F43F5E';
-                          else if (activeTether.color.includes('amber')) strokeColor = '#FBBF24';
-                          else if (activeTether.color.includes('fuchsia')) strokeColor = '#D946EF';
+                          let strokeColor = activeTether.color.includes('emerald') ? '#10B981' : (activeTether.color.includes('rose') ? '#F43F5E' : (activeTether.color.includes('amber') ? '#FBBF24' : (activeTether.color.includes('fuchsia') ? '#D946EF' : '#3B82F6')));
                           return <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeDasharray={`${6/zoom},${4/zoom}`} className="opacity-50" />;
                       })()}
                   </svg>
@@ -363,45 +331,29 @@ export default function App() {
                         {(item.isOrigin || item.isTrigger) ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />}
                         {LATCH_POINTS.map(lp => {
                           const { dotColor, isActive } = getPortState(item, lp, connections, activeTether);
-                          const opacityClass = isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-50';
-                          return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
+                          return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
                         })}
                       </div>
                     </div>
                   ))}
                 </>
               ) : (
-                <div className="p-12 max-w-5xl">
-                   <h1 className="text-4xl font-black italic uppercase text-slate-800 mb-8">Dashboard</h1>
-                   <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm w-64 h-32 flex flex-col justify-center">
-                       <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Total Nodes</p>
-                       <p className="text-4xl font-black text-slate-800">{canvasItems.length}</p>
-                   </div>
-                </div>
+                <div className="p-12 max-w-5xl"><h1 className="text-4xl font-black italic uppercase text-slate-800 mb-8">Dashboard</h1><div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm w-64 h-32 flex flex-col justify-center"><p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Total Nodes</p><p className="text-4xl font-black text-slate-800">{canvasItems.length}</p></div></div>
               )}
           </div>
         </div>
       </main>
-      <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
-        <LayoutGrid size={20} className="text-slate-600" />
-      </div>
-      <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
-        <Waypoints size={20} className="text-slate-600" />
-      </div>
-      <div onClick={handleZoomIn} title="Zoom In" className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
-        <Plus size={20} className="text-slate-700" />
-      </div>
-      <div onClick={handleZoomOut} title="Zoom Out" className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
-        <Minus size={20} className="text-slate-700" />
-      </div>
-      <div onClick={() => setActiveFolderView('toolbox')} className="fixed bottom-[28px] left-[28px] z-[500] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800 p-0 box-border">
-        <Folder size={20} className="text-white" />
-      </div>
-      <div onClick={() => setActiveFolderView('nav')} className="fixed bottom-[28px] right-[28px] z-[500] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700 p-0 box-border">
-        <Compass size={20} className="text-white" />
-      </div>
-      <AndroidFolder title={navData.title} icon={navData.icon} color={navData.color} items={navData.items} isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
-      <AndroidFolder title={toolboxData.title} icon={toolboxData.icon} color={toolboxData.color} items={toolboxData.items} isOpen={activeFolderView === 'toolbox'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
+      <div onClick={() => gatherLayout('grid')} className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><LayoutGrid size={20} className="text-slate-600" /></div>
+      <div onClick={() => gatherLayout('tether')} className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Waypoints size={20} className="text-slate-600" /></div>
+      <div onClick={handleZoomIn} className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Plus size={20} className="text-slate-700" /></div>
+      <div onClick={handleZoomOut} className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Minus size={20} className="text-slate-700" /></div>
+      
+      <div onClick={() => setActiveFolderView(v => v === 'toolbox' ? null : 'toolbox')} className="fixed bottom-[28px] left-[28px] z-[700] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800"><Folder size={20} className="text-white" /></div>
+      <div onClick={() => setActiveFolderView(v => v === 'nav' ? null : 'nav')} className="fixed bottom-[28px] right-[28px] z-[700] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-blue-700"><Compass size={20} className="text-white" /></div>
+      
+      <CompactFolderView data={toolboxData} side="left" isOpen={activeFolderView === 'toolbox'} onClose={() => setActiveFolderView(null)} />
+      <CompactFolderView data={navData} side="right" isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} />
+
       {isStudioOpen && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-slate-100 space-y-6">
@@ -412,12 +364,7 @@ export default function App() {
             </div>
             <div className="flex gap-4">
               <button onClick={() => setIsStudioOpen(false)} className="flex-1 py-5 bg-slate-100 text-slate-400 font-black uppercase text-xs rounded-3xl">Cancel</button>
-              <button onClick={() => {
-                if (!editingItem) return;
-                const dna = { name: studioName, icon: studioIcon, payload: studioPayload, isRegistered: true };
-                setCanvasItems(prev => prev.map(i => i.instanceId === editingItem.instanceId ? { ...i, ...dna } : i));
-                setIsStudioOpen(false); setEditingItem(null);
-              }} className="flex-1 py-5 bg-slate-900 text-white font-black uppercase text-xs rounded-3xl">Initialize</button>
+              <button onClick={() => { if (!editingItem) return; setCanvasItems(prev => prev.map(i => i.instanceId === editingItem.instanceId ? { ...i, name: studioName, icon: studioIcon, payload: studioPayload, isRegistered: true } : i)); setIsStudioOpen(false); setEditingItem(null); }} className="flex-1 py-5 bg-slate-900 text-white font-black uppercase text-xs rounded-3xl">Initialize</button>
             </div>
           </div>
         </div>
