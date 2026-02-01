@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
@@ -104,18 +104,9 @@ export default function App() {
       if (current === nodeId) return true;
       if (visited.has(current)) continue;
       visited.add(current);
-      const outgoing = connections.filter(c => c.sourceId === current);
+      // Execution tree ignores Fuchsia isolated inputs
+      const outgoing = connections.filter(c => c.sourceId === current && !c.color.includes('fuchsia'));
       outgoing.forEach(c => stack.push(c.targetId));
-    }
-    return false;
-  };
-
-  const isAncestor = (ancId: string, descId: string): boolean => {
-    let curr = descId; const visited = new Set<string>();
-    while (curr) {
-      if (curr === ancId) return true; if (visited.has(curr)) break; visited.add(curr);
-      const incoming = connections.find(c => c.targetId === curr && !c.color.includes('fuchsia'));
-      if (!incoming) break; curr = incoming.sourceId;
     }
     return false;
   };
@@ -131,7 +122,7 @@ export default function App() {
       const minGap = mode === 'tether' ? 32 : 0;
       
       const isPositionOccupied = (x: number, y: number) => {
-        const threshold = minGap + 1;
+        const threshold = 1; 
         for (const pos of occupied) {
           const [ox, oy] = pos.split(',').map(Number);
           if (Math.abs(ox - x) < threshold && Math.abs(oy - y) < threshold) return true;
@@ -149,7 +140,9 @@ export default function App() {
           let found = false, safety = 0, searchDist = step + minGap, tx = cx, ty = cy;
           
           if (conn.color.includes('fuchsia')) {
-            tx = cx; ty = cy - (32 + minGap); // Sit exactly one cell block above
+            // Isolated Inputs: Source sits one cell block above target
+            // But gather follows flow, so if we are processing target from root, fuchsia input is "parent"
+            // We need to special case fuchsia: we process root tree, then place floating inputs
           } else {
             while (!found && safety < 15) {
               let nextX = cx, nextY = cy;
@@ -161,9 +154,19 @@ export default function App() {
               if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += 32; }
               safety++;
             }
+            const target = newItems.find(i => i.instanceId === conn.targetId);
+            if (target) { target.x = tx; target.y = ty; visited.add(target.instanceId); occupied.add(`${tx},${ty}`); processNode(target.instanceId, tx, ty); }
           }
-          const target = newItems.find(i => i.instanceId === conn.targetId);
-          if (target) { target.x = tx; target.y = ty; visited.add(target.instanceId); occupied.add(`${tx},${ty}`); processNode(target.instanceId, tx, ty); }
+        });
+
+        // After tree nodes, place fuchsia inputs connected to this node's Top
+        const inputs = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
+        inputs.forEach(conn => {
+          if (visited.has(conn.sourceId)) return;
+          const tx = cx;
+          const ty = cy - (32 + minGap); // One cell block above
+          const source = newItems.find(i => i.instanceId === conn.sourceId);
+          if (source) { source.x = tx; source.y = ty; visited.add(source.instanceId); occupied.add(`${tx},${ty}`); }
         });
       };
       
@@ -186,30 +189,29 @@ export default function App() {
       const dy = (dragNode.y || 0) - other.y;
       const adx = Math.abs(dx); const ady = Math.abs(dy);
       
-      const isAncestorNode = isAncestor(dId, other.instanceId);
-      const isFuchsia = (dragInTree && !otherInTree) || (!dragInTree && otherInTree);
+      // Floating Node (Source) -> Tree Node (Target Top) = Fuchsia
+      if (!dragInTree && otherInTree) {
+         // Draggable node exits (bottom/right/left) into Tree node Top
+         if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+           // Floating Bottom -> Tree Top
+           ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
+         }
+      }
 
-      // Bottom (Green/Success) -> Top (Blue/Input)
-      if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-        if (!connections.find(c => c.sourceId === other.instanceId && c.sourceSide === 'bottom')) {
-           ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: isFuchsia ? 'bg-fuchsia-500' : 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
-        }
-      }
-      // Right (Red/Error) -> Top (Blue/Input)
-      else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-        if (!connections.find(c => c.sourceId === other.instanceId && c.sourceSide === 'right')) {
-           ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: isFuchsia ? 'bg-fuchsia-500' : 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
-        }
-      }
-      // Left (Yellow/Parallel) -> Top (Blue/Input)
-      else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-        if (!connections.find(c => c.sourceId === other.instanceId && c.sourceSide === 'left')) {
-           ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: isFuchsia ? 'bg-fuchsia-500' : 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
-        }
-      }
-      // Top (Blue/Recursion) -> Any exit
-      else if (isAncestorNode && dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'top', targetId: dId, targetSide: 'top', color: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
+      // Standard Flow: Tree Node (Source) -> Floating Node (Target Top)
+      if (dragInTree && !otherInTree) {
+          // Bottom (Green/Success) -> Top
+          if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
+          }
+          // Right (Red/Error) -> Top
+          else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
+          }
+          // Left (Yellow/Parallel) -> Top
+          else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+          }
       }
     });
 
@@ -340,7 +342,7 @@ export default function App() {
                               <circle 
                                 cx={pathData.mid.x} cy={pathData.mid.y} r="8" 
                                 fill="white" stroke={c} strokeWidth="2" 
-                                className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform" 
+                                className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform shadow-sm" 
                                 onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }}
                               />
                               <X x={pathData.mid.x - 3} y={pathData.mid.y - 3} size={6} stroke={c} strokeWidth={3} className="pointer-events-none" />
@@ -359,7 +361,7 @@ export default function App() {
                   </svg>
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
-                      className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                      className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32, transition: isDragging && draggingId === item.instanceId ? 'none' : '' }}>
                       {item.name === 'Circuit Breaker' && <div className="absolute inset-0 translate-x-1 translate-y-1 bg-slate-200 rounded-md -z-10" />}
                       <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-blue-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
                         <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />
@@ -367,15 +369,20 @@ export default function App() {
                         {LATCH_POINTS.map(lp => {
                           const connected = connections.find(c => (c.sourceId === item.instanceId && c.sourceSide === lp.id) || (c.targetId === item.instanceId && c.targetSide === lp.id));
                           let dotColor = 'bg-slate-200';
+                          let glowClass = '';
                           if (connected) {
-                            if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
-                            else if (lp.id === 'right') dotColor = 'bg-rose-500';
-                            else if (lp.id === 'left') dotColor = 'bg-amber-400';
-                            else dotColor = 'bg-blue-500';
+                            if (lp.id === 'bottom') { dotColor = 'bg-emerald-500'; glowClass = 'shadow-[0_0_8px_rgba(16,185,129,0.5)]'; }
+                            else if (lp.id === 'right') { dotColor = 'bg-rose-500'; glowClass = 'shadow-[0_0_8px_rgba(244,63,94,0.5)]'; }
+                            else if (lp.id === 'left') { dotColor = 'bg-amber-400'; glowClass = 'shadow-[0_0_8px_rgba(251,191,36,0.5)]'; }
+                            else { 
+                              const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
+                              dotColor = isFuchsia ? 'bg-fuchsia-500' : 'bg-blue-500'; 
+                              glowClass = isFuchsia ? 'shadow-[0_0_8px_rgba(217,70,239,0.5)]' : 'shadow-[0_0_8px_rgba(59,130,246,0.5)]';
+                            }
                           }
                           
                           return (
-                            <div key={lp.id} className={`absolute w-2 h-2 rounded-full border border-white shadow-sm transition-colors ${dotColor}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} />
+                            <div key={lp.id} className={`absolute w-2 h-2 rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${glowClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8, height: 8 }} />
                           );
                         })}
                       </div>

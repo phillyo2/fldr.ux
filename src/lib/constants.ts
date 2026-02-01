@@ -3,9 +3,9 @@ import { LatchPoint } from './types';
 
 export const GRID_SIZE = 32;
 export const UNIT_SIZE_VAL = 32; 
-export const SNAP_TOLERANCE = 64; 
-export const DETECTION_RANGE = 128; 
-export const TETHER_DELAY = 100; 
+export const SNAP_TOLERANCE = 48; 
+export const DETECTION_RANGE = 96; 
+export const TETHER_DELAY = 80; 
 export const HEADER_OFFSET = 56;
 export const ICON_SIZE = 24; 
 export const LONG_PRESS_MS = 150; 
