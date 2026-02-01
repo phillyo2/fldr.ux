@@ -197,6 +197,8 @@ export default function App() {
 
   const gatherLayout = (mode: 'grid' | 'tether') => {
     setLayoutMode(mode);
+    setIsTransitioning(true);
+
     setCanvasItems(prev => {
         const newItems = prev.map(item => ({ ...item }));
         const visited = new Set<string>();
@@ -214,68 +216,81 @@ export default function App() {
             return { tx, ty };
         };
 
+        const connIds = new Set([
+            ...connections.map(c => c.sourceId),
+            ...connections.map(c => c.targetId)
+        ]);
+
+        const standalone = newItems.filter(i => !connIds.has(i.instanceId));
+        const inFlow = newItems.filter(i => connIds.has(i.instanceId));
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
-        const roots = newItems.filter(i => !incomingTargetIds.has(i.instanceId));
+        const roots = inFlow.filter(i => !incomingTargetIds.has(i.instanceId));
 
-        const processNode = (nodeId: string, cx: number, cy: number) => {
-            visited.add(nodeId);
-            occupied.add(getPosKey(cx, cy));
-            
-            const node = newItems.find(i => i.instanceId === nodeId);
-            if (node) { node.x = cx; node.y = cy; }
+        // 1. Layout Stand-alone tiles grid (Top Left Above)
+        let sx = 64, sy = 120;
+        standalone.forEach((item, idx) => {
+          item.x = snapToGrid(sx + (idx % 6) * GRID_SIZE * 2, 0);
+          item.y = snapToGrid(sy + Math.floor(idx / 6) * GRID_SIZE * 2, HEADER_OFFSET);
+          occupied.add(getPosKey(item.x, item.y));
+          visited.add(item.instanceId);
+        });
 
-            const outgoing = connections.filter(c => c.sourceId === nodeId);
-            outgoing.forEach(conn => {
-                if (visited.has(conn.targetId)) return;
-                
-                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
-                let tx = cx, ty = cy;
-
-                if (conn.sourceSide === 'bottom') ty += step;
-                else if (conn.sourceSide === 'right') tx += step;
-                else if (conn.sourceSide === 'left') tx -= step;
-                else if (conn.sourceSide === 'top') ty -= step;
-
-                if (isAncestor(conn.targetId, nodeId, connections)) ty += step * 2;
-
-                const { tx: finalX, ty: finalY } = findSafePosition(
-                    snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), 
-                    0, GRID_SIZE
-                );
-
-                processNode(conn.targetId, finalX, finalY);
-            });
-        };
-
-        const centerX = snapToGrid(windowSize.w / 2 - 16, 0);
-        let startY = snapToGrid(windowSize.h * 0.3, HEADER_OFFSET);
+        // 2. Layout Workflows Horizontally
+        let currentFlowX = snapToGrid(windowSize.w / 2 - 16, 0);
+        const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
         const sortedRoots = [...roots].sort((a, b) => {
-          const aLeadsToOrigin = a.isOrigin || isAncestor(a.instanceId, 'entry_origin', connections);
-          const bLeadsToOrigin = b.isOrigin || isAncestor(b.instanceId, 'entry_origin', connections);
-          if (aLeadsToOrigin && !bLeadsToOrigin) return -1;
-          if (!aLeadsToOrigin && bLeadsToOrigin) return 1;
+          if (a.isOrigin) return -1;
+          if (b.isOrigin) return 1;
           return 0;
         });
 
         sortedRoots.forEach((root) => {
-            if (visited.has(root.instanceId)) return;
-            const { tx, ty } = findSafePosition(centerX, startY, 0, GRID_SIZE * 2);
-            processNode(root.instanceId, tx, ty);
-            startY = ty + (mode === 'grid' ? GRID_SIZE * 2 : GRID_SIZE * 3);
+            let maxNodeX = currentFlowX;
+            
+            const processNode = (nodeId: string, cx: number, cy: number) => {
+                visited.add(nodeId);
+                occupied.add(getPosKey(cx, cy));
+                maxNodeX = Math.max(maxNodeX, cx);
+                
+                const node = newItems.find(i => i.instanceId === nodeId);
+                if (node) { node.x = cx; node.y = cy; }
+
+                const outgoing = connections.filter(c => c.sourceId === nodeId);
+                outgoing.forEach(conn => {
+                    if (visited.has(conn.targetId)) return;
+                    const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
+                    let tx = cx, ty = cy;
+
+                    if (conn.sourceSide === 'bottom') ty += step * 2;
+                    else if (conn.sourceSide === 'right') tx += step * 2;
+                    else if (conn.sourceSide === 'left') tx -= step * 2;
+                    else if (conn.sourceSide === 'top') ty -= step * 2;
+
+                    const { tx: finalX, ty: finalY } = findSafePosition(
+                        snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), 
+                        0, GRID_SIZE
+                    );
+                    processNode(conn.targetId, finalX, finalY);
+                });
+            };
+
+            processNode(root.instanceId, currentFlowX, startY);
+            // Ensure at least 3 cell blocks (96px) + buffer gap between flows
+            currentFlowX = snapToGrid(maxNodeX + GRID_SIZE * 6, 0);
         });
 
-        const origin = newItems.find(i => i.isOrigin) || sortedRoots[0];
+        // 3. Pan to Origin
+        const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
         if (origin) {
             const targetVX = windowSize.w / 2 - (origin.x + 16) * zoom;
             const targetVY = windowSize.h / 2 - (origin.y - HEADER_OFFSET + 16) * zoom;
-            
-            setIsTransitioning(true);
             setViewOffset({ x: targetVX, y: targetVY });
-            setTimeout(() => setIsTransitioning(false), 500);
         }
         return newItems;
     });
+
+    setTimeout(() => setIsTransitioning(false), 600);
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
@@ -286,6 +301,7 @@ export default function App() {
     let minDist = Infinity;
 
     canvasItems.forEach(node => {
+      // Prioritize output anchors (Bottom or Right)
       const bX = node.x + 16;
       const bY = node.y + 32;
       const dBottom = Math.sqrt(Math.pow(bX - screenCenterX, 2) + Math.pow(bY - screenCenterY, 2));
@@ -316,24 +332,24 @@ export default function App() {
     const newItem = { ...item, instanceId: newInstanceId, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem;
     setCanvasItems(prev => [...prev, newItem]);
 
-    const margin = 120;
+    // Soft Panning: shift view if spawn is near edge
+    const margin = 150;
     const screenSpawnX = spawnX * zoom + viewOffset.x;
     const screenSpawnY = (spawnY - HEADER_OFFSET) * zoom + viewOffset.y;
 
-    const isOffScreen = 
+    if (
       screenSpawnX < margin || 
       screenSpawnX > windowSize.w - margin ||
       screenSpawnY < margin ||
-      screenSpawnY > windowSize.h - margin;
-
-    if (isOffScreen) {
+      screenSpawnY > windowSize.h - margin
+    ) {
       const targetVX = windowSize.w / 2 - (spawnX + 16) * zoom;
       const targetVY = windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom;
       
       setIsTransitioning(true);
       setViewOffset(prev => ({
-        x: prev.x + (targetVX - prev.x) * 0.7,
-        y: prev.y + (targetVY - prev.y) * 0.7
+        x: prev.x + (targetVX - prev.x) * 0.6,
+        y: prev.y + (targetVY - prev.y) * 0.6
       }));
       setTimeout(() => setIsTransitioning(false), 500);
     }
