@@ -229,11 +229,11 @@ export default function App() {
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
         const roots = inFlow.filter(i => !incomingTargetIds.has(i.instanceId));
 
-        // 1. Layout Stand-alone tiles grid (Top Left Above)
+        // 1. Layout Stand-alone tiles grid (Dense: No extra padding)
         let sx = 64, sy = 120;
         standalone.forEach((item, idx) => {
-          item.x = snapToGrid(sx + (idx % 6) * GRID_SIZE * 2, 0);
-          item.y = snapToGrid(sy + Math.floor(idx / 6) * GRID_SIZE * 2, HEADER_OFFSET);
+          item.x = snapToGrid(sx + (idx % 8) * GRID_SIZE, 0);
+          item.y = snapToGrid(sy + Math.floor(idx / 8) * GRID_SIZE, HEADER_OFFSET);
           occupied.add(getPosKey(item.x, item.y));
           visited.add(item.instanceId);
         });
@@ -279,8 +279,8 @@ export default function App() {
             };
 
             processNode(root.instanceId, currentFlowX, startY);
-            // Ensure at least 3 cell blocks (96px) + buffer gap between flows
-            currentFlowX = snapToGrid(maxNodeX + GRID_SIZE * 6, 0);
+            // Reduced gap between workflows: 2 cell blocks (64px) + buffer
+            currentFlowX = snapToGrid(maxNodeX + GRID_SIZE * 3, 0);
         });
 
         // 3. Pan to Origin
