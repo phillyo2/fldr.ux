@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Trash2, X, LayoutGrid, Waypoints, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
@@ -96,20 +96,32 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
-  const isNodeInTree = (nodeId: string): boolean => {
+  // --- TREE LOGIC ---
+  const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
+    const contexts = new Map<string, string>();
     const visited = new Set<string>();
-    const stack = ['entry_origin'];
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      if (current === nodeId) return true;
-      if (visited.has(current)) continue;
-      visited.add(current);
-      // Fuchsia (Isolated) and Yellow (Subtree) lines are strictly followed
-      // But only non-fuchsia lines contribute to "Main Tree" membership
-      const outgoing = connRef.current.filter(c => c.sourceId === current && !c.color.includes('fuchsia'));
-      outgoing.forEach(c => stack.push(c.targetId));
+    const queue: {id: string, context: string}[] = [{id: 'entry_origin', context: 'main'}];
+    
+    contexts.set('entry_origin', 'main');
+
+    while(queue.length > 0) {
+      const {id, context} = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+
+      const outgoing = currentConnections.filter(c => c.sourceId === id && !c.color.includes('fuchsia'));
+      for (const conn of outgoing) {
+        // Yellow (Amber) creates a new isolated context
+        const nextContext = conn.color.includes('amber') ? `sub_${conn.targetId}` : context;
+        contexts.set(conn.targetId, nextContext);
+        queue.push({id: conn.targetId, context: nextContext});
+      }
     }
-    return false;
+    return contexts.get(nodeId) || null;
+  };
+
+  const isNodeInTree = (nodeId: string): boolean => {
+    return !!getTreeContext(nodeId, connRef.current);
   };
 
   const gatherLayout = (mode: 'grid' | 'tether') => {
@@ -140,7 +152,7 @@ export default function App() {
           let found = false, safety = 0, searchDist = GRID_SIZE + minGap, tx = cx, ty = cy;
           
           if (conn.color.includes('fuchsia')) {
-            // Isolated Inputs positioned exactly one block above their target
+            // Isolated Inputs positioned above
           } else {
             while (!found && safety < 15) {
               let nextX = cx, nextY = cy;
@@ -157,7 +169,7 @@ export default function App() {
           }
         });
 
-        // Position isolated inputs exactly one cell block above
+        // Position isolated inputs
         const inputs = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
         inputs.forEach(conn => {
           if (visited.has(conn.sourceId)) return;
@@ -178,11 +190,11 @@ export default function App() {
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
     
-    const dragInTree = isNodeInTree(dId);
+    const dragCtx = getTreeContext(dId, connRef.current);
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
-      const otherInTree = isNodeInTree(other.instanceId);
+      const otherCtx = getTreeContext(other.instanceId, connRef.current);
       
       const getPortPos = (item: any, side: string) => {
         if (side === 'top') return { x: item.x + 16, y: item.y };
@@ -193,10 +205,10 @@ export default function App() {
       };
 
       LATCH_POINTS.forEach(lSource => {
-        // Output on Ancestor (S or D) attaches to Input (Top/Blue) on Descendant (D or S)
+        // Source is Parent, Target is Child (Standard Top Input)
         const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
 
-        // Case 1: Drag Node is Ancestor -> Stationary is Descendant
+        // 1. Drag Node is Source (Ancestor) -> Other is Target (Descendant)
         const sPos = getPortPos(dragNode, lSource.id);
         const tPos = getPortPos(other, lTarget.id);
         const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
@@ -208,21 +220,18 @@ export default function App() {
           else if (lSource.id === 'left') color = 'bg-amber-400';
           else if (lSource.id === 'top') color = 'bg-blue-500';
 
-          // Isolated Input Logic: Source (D) is floating, Target (S) is in tree
-          if (!dragInTree && otherInTree) color = 'bg-fuchsia-500';
+          let valid = false;
+          // Tree Expansion: Tree Source -> Floating Target
+          if (dragCtx && !otherCtx) valid = true;
+          // Recursion: Same Tree Context
+          if (dragCtx && otherCtx && dragCtx === otherCtx) valid = true;
 
-          ghosts.push({
-            id: 'ghost',
-            sourceId: dId,
-            sourceSide: lSource.id,
-            targetId: other.instanceId,
-            targetSide: lTarget.id,
-            color,
-            dotDistance: dist
-          } as any);
+          if (valid) {
+            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
+          }
         }
 
-        // Case 2: Stationary is Ancestor -> Drag Node is Descendant
+        // 2. Other is Source (Ancestor) -> Drag Node is Target (Descendant)
         const sPosInv = getPortPos(other, lSource.id);
         const tPosInv = getPortPos(dragNode, lTarget.id);
         const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
@@ -234,18 +243,17 @@ export default function App() {
           else if (lSource.id === 'left') color = 'bg-amber-400';
           else if (lSource.id === 'top') color = 'bg-blue-500';
 
-          // Isolated Input Logic: Source (S) is floating, Target (D) is in tree
-          if (!otherInTree && dragInTree) color = 'bg-fuchsia-500';
+          let valid = false;
+          // Tree Expansion: Tree Source -> Floating Target
+          if (otherCtx && !dragCtx) valid = true;
+          // Recursion: Same Tree Context
+          if (dragCtx && otherCtx && dragCtx === otherCtx) valid = true;
+          // Isolated Input: Floating Source -> Tree Top Input
+          if (!otherCtx && dragCtx && lTarget.id === 'top') { color = 'bg-fuchsia-500'; valid = true; }
 
-          ghosts.push({
-            id: 'ghost',
-            sourceId: other.instanceId,
-            sourceSide: lSource.id,
-            targetId: dId,
-            targetSide: lTarget.id,
-            color,
-            dotDistance: distInv
-          } as any);
+          if (valid) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
+          }
         }
       });
     });
