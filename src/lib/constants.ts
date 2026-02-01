@@ -3,7 +3,7 @@ import { LatchPoint } from './types';
 
 export const GRID_SIZE = 32;
 export const UNIT_SIZE_VAL = 32; 
-export const SNAP_TOLERANCE = 24; // Increased for more aggressive magnetism
+export const SNAP_TOLERANCE = 24; // Magnetic latch distance
 export const DETECTION_RANGE = 128; // 4 Cell Blocks for proactive port visibility
 export const TETHER_DELAY = 0; // Instant handshake confirmation
 export const HEADER_OFFSET = 56;

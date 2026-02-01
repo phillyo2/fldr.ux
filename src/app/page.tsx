@@ -1,8 +1,8 @@
 
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Trash2, X, LayoutGrid, Waypoints, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Trash2, X, LayoutGrid, Waypoints, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft, LayoutTemplate, Home, Shuffle } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
@@ -33,7 +33,6 @@ export default function App() {
   const [dragStartPos, setDragStartPos] = useState<{id: string, x: number, y: number} | null>(null); 
 
   const [activeTether, setActiveTether] = useState<Connection | null>(null); 
-  const tetherTimer = useRef<NodeJS.Timeout | null>(null);
 
   const toolboxData: FolderData = {
     id: 'toolbox',
@@ -69,7 +68,6 @@ export default function App() {
   const mouseOffset = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
   const panOffsetStart = useRef({ x: 0, y: 0 });
-  const lastValidPos = useRef({ x: 128, y: 128 + HEADER_OFFSET });
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const [editingItem, setEditingItem] = useState<CanvasItem | null>(null);
@@ -84,7 +82,6 @@ export default function App() {
     setWindowSize({ w, h });
     const centerX = snapToGrid(w / 2 - 16, 0);
     setCanvasItems(prev => prev.map(item => item.isOrigin ? { ...item, x: centerX } : item));
-    lastValidPos.current = { x: centerX, y: 128 + HEADER_OFFSET };
     setTimeout(() => setIsReady(true), 50);
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
@@ -103,7 +100,7 @@ export default function App() {
       if (node === potentialDescendantId) return true;
       if (visited.has(node)) continue;
       visited.add(node);
-      conns.filter(c => c.sourceId === node).forEach(c => stack.push(c.targetId));
+      conns.filter(c => c.sourceId === node && !c.color.includes('fuchsia')).forEach(c => stack.push(c.targetId));
     }
     return false;
   };
@@ -121,7 +118,7 @@ export default function App() {
 
       const outgoing = currentConnections.filter(c => c.sourceId === id && !c.color.includes('fuchsia'));
       for (const conn of outgoing) {
-        const nextContext = conn.color.includes('amber') ? `sub_${conn.targetId}` : context;
+        const nextContext = conn.sourceSide === 'left' ? `sub_${conn.targetId}` : context;
         contexts.set(conn.targetId, nextContext);
         queue.push({id: conn.targetId, context: nextContext});
       }
@@ -155,7 +152,7 @@ export default function App() {
       LATCH_POINTS.forEach(lSource => {
         const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
 
-        // 1. Drag Node is Source -> Other is Target
+        // 1. Drag Node is Source -> Other is Target (Targeting Top/Blue)
         const sPos = getPortPos(dragNode, lSource.id);
         const tPos = getPortPos(other, lTarget.id);
         const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
@@ -164,16 +161,21 @@ export default function App() {
           let color = lSource.color.replace('bg-', '');
           let valid = false;
 
-          // Standard Expansion: Dragging floating node onto tree node
-          if (dragCtx && !otherCtx && lSource.id !== 'top') valid = true;
-          
-          // Recursion: Dragged Descendant -> Ancestor
-          // Only allowed from Green (bottom) or Red (right) ports to ancestor Top (blue)
-          if (dragCtx && otherCtx && dragCtx === otherCtx) {
+          // Isolated Input Logic: Floating Source -> Tree Target (Blue Input)
+          if (!dragCtx && otherCtx && lTarget.id === 'top') {
+            valid = true;
+            color = 'fuchsia-500';
+          }
+          // Standard Flow: Source in Tree -> Target (Standard attachment)
+          else if (dragCtx && !otherCtx && lSource.id !== 'top') {
+             valid = true;
+          }
+          // Recursion: Descendant (Green/Red) -> Ancestor (Blue Input)
+          else if (dragCtx && otherCtx && dragCtx === otherCtx) {
             if (isAncestor(other.instanceId, dId, connRef.current)) {
               if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') {
                 valid = true;
-                color = 'blue-500'; // Signify jump
+                color = 'blue-500';
               }
             }
           }
@@ -183,7 +185,7 @@ export default function App() {
           }
         }
 
-        // 2. Other is Source -> Drag Node is Target
+        // 2. Other is Source -> Drag Node is Target (Dragging onto Top/Blue)
         const sPosInv = getPortPos(other, lSource.id);
         const tPosInv = getPortPos(dragNode, lTarget.id);
         const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
@@ -192,23 +194,14 @@ export default function App() {
           let color = lSource.color.replace('bg-', '');
           let valid = false;
 
-          // Standard Expansion: Dragging tree node source to floating target
-          if (otherCtx && !dragCtx && lSource.id !== 'top') valid = true;
-
-          // Recursion: Ancestor Source -> Dragged Descendant Target
-          if (dragCtx && otherCtx && dragCtx === otherCtx) {
-             if (isAncestor(dId, other.instanceId, connRef.current)) {
-               if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') {
-                 valid = true;
-                 color = 'blue-500';
-               }
-             }
-          }
-
-          // Isolated Input: Floating source -> Tree Top
-          if (!otherCtx && dragCtx && lTarget.id === 'top' && lSource.id !== 'top') {
-            color = 'fuchsia-500';
+          // Tree node source -> Floating target
+          if (otherCtx && !dragCtx && lSource.id !== 'top') {
             valid = true;
+          }
+          // Floating Source -> Tree Target (Fuchsia)
+          if (!otherCtx && dragCtx && lTarget.id === 'top') {
+            valid = true;
+            color = 'fuchsia-500';
           }
 
           if (valid) {
@@ -248,7 +241,10 @@ export default function App() {
           let found = false, safety = 0, searchDist = GRID_SIZE + minGap, tx = cx, ty = cy;
           
           if (conn.color.includes('fuchsia')) {
-            // Isolated Inputs positioned above
+            // Fuchsia providers sit exactly one block above
+            tx = cx;
+            ty = cy - (GRID_SIZE * 2); 
+            found = true;
           } else {
             while (!found && safety < 15) {
               let nextX = cx, nextY = cy;
@@ -260,18 +256,14 @@ export default function App() {
               if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += GRID_SIZE; }
               safety++;
             }
-            const target = newItems.find(i => i.instanceId === conn.targetId);
-            if (target) { target.x = tx; target.y = ty; visited.add(target.instanceId); occupied.add(`${tx},${ty}`); processNode(target.instanceId, tx, ty); }
           }
-        });
-
-        const inputs = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
-        inputs.forEach(conn => {
-          if (visited.has(conn.sourceId)) return;
-          const tx = cx;
-          const ty = cy - (GRID_SIZE * 2); 
-          const source = newItems.find(i => i.instanceId === conn.sourceId);
-          if (source) { source.x = tx; source.y = ty; visited.add(source.instanceId); occupied.add(`${tx},${ty}`); }
+          
+          const target = newItems.find(i => i.instanceId === conn.targetId);
+          if (target && found) { 
+            target.x = tx; target.y = ty; 
+            visited.add(target.instanceId); occupied.add(`${tx},${ty}`); 
+            processNode(target.instanceId, tx, ty); 
+          }
         });
       };
       
@@ -288,15 +280,11 @@ export default function App() {
   };
 
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
-    const now = Date.now();
     const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
-    
-    if (currentPageId !== 'home') {
-      setIsPanning(true); 
-      panStart.current = { x: clientX, y: clientY }; 
-      panOffsetStart.current = { ...viewOffset };
-    }
+    setIsPanning(true); 
+    panStart.current = { x: clientX, y: clientY }; 
+    panOffsetStart.current = { ...viewOffset };
   };
 
   const handleItemPointerDown = (e: React.MouseEvent | React.TouchEvent, item: CanvasItem) => {
@@ -305,7 +293,6 @@ export default function App() {
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     setDragStartPos({ id: item.instanceId, x: clientX, y: clientY });
     mouseOffset.current = { x: clientX - item.x, y: clientY - item.y };
-    lastValidPos.current = { x: item.x, y: item.y };
     pressTimer.current = setTimeout(() => { setIsDragging(true); setDraggingId(item.instanceId); }, LONG_PRESS_MS);
   };
 
@@ -360,7 +347,6 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
-        // Sticky Latch: Require further distance to detach
         if (!best || best.dotDistance > SNAP_TOLERANCE * 1.5) {
           setActiveTether(null);
         }
@@ -424,7 +410,7 @@ export default function App() {
         <div className="w-full h-full relative overflow-hidden bg-white" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
           <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `32px 32px`, backgroundPosition: `${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px` }} />
 
-          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className="w-full h-full relative">
+          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className={`w-full h-full relative ${isDragging ? '' : 'transition-transform duration-300'}`}>
               {currentPageId === 'studio' ? (
                 <>
                   <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-visible">
