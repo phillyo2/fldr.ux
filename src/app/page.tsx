@@ -262,22 +262,19 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
+                // Recursion logic: only unsnap if the target itself points back to an ancestor
                 const isPerformingRecursion = connections.some(c => 
                     c.sourceId === conn.targetId && 
-                    !c.color.includes('emerald') && 
-                    !c.color.includes('rose') && 
-                    !c.color.includes('amber') &&
-                    !c.color.includes('fuchsia') &&
+                    c.color.includes('blue') && 
                     isAncestor(c.targetId, conn.targetId, connections)
                 );
 
                 const isStandardBluePath = !conn.color.includes('emerald') && !conn.color.includes('rose') && !conn.color.includes('amber') && !conn.color.includes('fuchsia');
 
                 let step = GRID_SIZE;
+                // If it's a blue line or it's performing recursion, we detach from parent by 1 cell block (64px stride)
                 if (mode === 'grid' && (isPerformingRecursion || isStandardBluePath)) {
                     step = GRID_SIZE * 2; 
-                } else if (mode === 'tether') {
-                    step = GRID_SIZE * 2;
                 }
 
                 let tx = cx, ty = cy;
@@ -454,7 +451,7 @@ export default function App() {
                           const isPersistent = isFuchsia || isEmerald || isRose;
                           if (!isPersistent && dist < 48) return null;
 
-                          const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
+                          const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems, connections);
                           let strokeColor = '#3B82F6'; 
                           if (conn.color.includes('emerald')) strokeColor = '#10B981';
                           else if (conn.color.includes('rose')) strokeColor = '#F43F5E';
@@ -477,7 +474,7 @@ export default function App() {
                           if(!s || !t) return null;
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
-                          const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
+                          const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems, connections);
                           let strokeColor = '#3B82F6';
                           if (activeTether.color.includes('emerald')) strokeColor = '#10B981';
                           else if (activeTether.color.includes('rose')) strokeColor = '#F43F5E';
@@ -514,7 +511,8 @@ export default function App() {
                             const connection = connectedAsSource || connectedAsTarget || (tethered ? activeTether : null);
                             if (connection) {
                               const isTargetPort = (connection.targetId === item.instanceId && connection.targetSide === lp.id);
-                              
+                              const isFuchsia = connection.color.includes('fuchsia');
+
                               if (isTargetPort) {
                                 const otherId = connection.sourceId;
                                 const otherSide = connection.sourceSide;
@@ -528,12 +526,13 @@ export default function App() {
                                   const itsY = otherItem.y + otherLp.y * 32;
                                   const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
 
-                                  if (dist < 24 && dotColor !== 'bg-fuchsia-500') {
+                                  // Culling Logic: Hide blue input dot if snapped (within 24px), but Fuchsia is exempt.
+                                  if (dist < 24 && !isFuchsia) {
                                     opacityClass = 'opacity-0 scale-50';
                                   }
                                 }
                               } else {
-                                // Parent Port Logic
+                                // Source/Parent Port Logic
                                 const otherId = connection.targetId;
                                 const otherSide = connection.targetSide;
                                 const otherItem = canvasItems.find(i => i.instanceId === otherId);
@@ -549,6 +548,7 @@ export default function App() {
                                   const hasIncomingFlow = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && !c.color.includes('fuchsia'));
                                   const isIsolatedInput = item.isOrigin || !hasIncomingFlow;
 
+                                  // If snapped and it's an isolated input (Origin/Trigger), hide the source (Green) dot too
                                   if (dist < 24 && lp.id === 'bottom' && isIsolatedInput) {
                                     opacityClass = 'opacity-0 scale-50';
                                   }
@@ -575,6 +575,7 @@ export default function App() {
         </div>
       </main>
 
+      {/* Discrete Studio UI Action Tiles - Fixed 28px Offset */}
       <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <LayoutGrid size={20} className="text-slate-600" />
       </div>

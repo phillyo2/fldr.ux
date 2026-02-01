@@ -1,12 +1,15 @@
 
 /**
- * Manhattan Loom Routing Engine v6.4 [Symmetric Industrial]
+ * Manhattan Loom Routing Engine v7.0 [Solid Flow Avoidance]
+ * Refined Manhattan A* with recursive avoidance and parallel segment culling.
  */
 
-import { CanvasItem } from './types';
+import { CanvasItem, Connection } from './types';
 
 const GRID_SIZE = 32;
-const TURN_PENALTY = 50;
+const TURN_PENALTY = 60;
+const OBSTACLE_PENALTY = 5000;
+const CONGESTION_PENALTY = 200;
 
 export const snapToGrid = (val: number, offset = 0, gridSize = GRID_SIZE) =>
   Math.round((val - offset) / gridSize) * gridSize + offset;
@@ -23,14 +26,30 @@ interface AStarNode extends Point {
   direction: Point | null;
 }
 
+const isAncestor = (potentialAncestorId: string, potentialDescendantId: string, conns: Connection[]) => {
+  const visited = new Set<string>();
+  const stack = [potentialAncestorId];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (node === potentialDescendantId) return true;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    conns.filter(c => c.sourceId === node && !c.color.includes('fuchsia')).forEach(c => stack.push(c.targetId));
+  }
+  return false;
+};
+
 const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], startPoint: Point, endPoint: Point) => {
-  if ((Math.abs(p.x - startPoint.x) < 2 && Math.abs(p.y - startPoint.y) < 2) ||
-      (Math.abs(p.x - endPoint.x) < 2 && Math.abs(p.y - endPoint.y) < 2)) {
+  // Allow path to start and end at the ports
+  if ((Math.abs(p.x - startPoint.x) < 5 && Math.abs(p.y - startPoint.y) < 5) ||
+      (Math.abs(p.x - endPoint.x) < 5 && Math.abs(p.y - endPoint.y) < 5)) {
     return false;
   }
+
   for (const tile of tiles) {
-    const left = tile.x - 2, right = tile.x + 34;
-    const top = (tile.y - 56) - 2, bottom = (tile.y - 56) + 34;
+    // Node bounds in canvas space (y-56)
+    const left = tile.x - 4, right = tile.x + 36;
+    const top = (tile.y - 56) - 4, bottom = (tile.y - 56) + 36;
     if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) return true;
   }
   return false;
@@ -46,6 +65,10 @@ const generateRoundedPath = (points: Point[]) => {
       const d1 = Math.sqrt(Math.pow(curr.x - prev.x, 2) + Math.pow(curr.y - prev.y, 2));
       const d2 = Math.sqrt(Math.pow(next.x - curr.x, 2) + Math.pow(next.y - curr.y, 2));
       const r = Math.min(radius, d1 / 2, d2 / 2);
+      if (r < 1) {
+        d += ` L ${curr.x} ${curr.y}`;
+        continue;
+      }
       const v1 = { x: (curr.x - prev.x) / d1, y: (curr.y - prev.y) / d1 };
       const v2 = { x: (next.x - curr.x) / d2, y: (next.y - curr.y) / d2 };
       const pStart = { x: curr.x - v1.x * r, y: curr.y - v1.y * r };
@@ -58,39 +81,78 @@ const generateRoundedPath = (points: Point[]) => {
   return d;
 };
 
-export const getSmartPath = (sX: number, sY: number, tX: number, tY: number, sourceSide: string, targetSide: string, sourceId: string, targetId: string, tiles: CanvasItem[]) => {
+export const getSmartPath = (
+  sX: number, sY: number, 
+  tX: number, tY: number, 
+  sourceSide: string, targetSide: string, 
+  sourceId: string, targetId: string, 
+  tiles: CanvasItem[],
+  allConnections: Connection[] = []
+) => {
   const start = { x: sX, y: sY }, end = { x: tX, y: tY };
+  const isRecursion = isAncestor(targetId, sourceId, allConnections);
 
-  // v6.4 Projection Patch: Force half-cell projection to align with grid centers symmetrically
+  // v7.0 Directional Projection
   let sDir = { x: 0, y: 0 };
-  if (sourceSide === 'right') sDir.x = 1; else if (sourceSide === 'left') sDir.x = -1; else if (sourceSide === 'bottom') sDir.y = 1; else if (sourceSide === 'top') sDir.y = -1;
+  if (sourceSide === 'right') sDir.x = 1; 
+  else if (sourceSide === 'left') sDir.x = -1; 
+  else if (sourceSide === 'bottom') sDir.y = 1; 
+  else if (sourceSide === 'top') sDir.y = -1;
   
   const projectedStart = { x: start.x + sDir.x * 16, y: start.y + sDir.y * 16 };
   const firstGridPoint = { x: snapToGrid(projectedStart.x, 16), y: snapToGrid(projectedStart.y, 16) };
 
-  const openSet: AStarNode[] = [{ ...firstGridPoint, g: 0, f: Math.abs(firstGridPoint.x - end.x) + Math.abs(firstGridPoint.y - end.y), parent: null, direction: sDir }];
+  // Heuristic: Manhattan distance
+  const getH = (p: Point) => Math.abs(p.x - end.x) + Math.abs(p.y - end.y);
+
+  const openSet: AStarNode[] = [{ 
+    ...firstGridPoint, 
+    g: 0, 
+    f: getH(firstGridPoint), 
+    parent: null, 
+    direction: sDir 
+  }];
   const closedSet = new Set<string>();
   let finalNode: AStarNode | null = null, iterations = 0;
+  const maxIterations = isRecursion ? 1500 : 800;
 
-  while (openSet.length > 0 && iterations < 500) {
+  while (openSet.length > 0 && iterations < maxIterations) {
     iterations++;
     openSet.sort((a, b) => a.f - b.f);
     const curr = openSet.shift()!;
     const key = `${curr.x},${curr.y}`;
-    if (Math.abs(curr.x - end.x) < 20 && Math.abs(curr.y - end.y) < 20) { finalNode = curr; break; }
+    
+    // Target proximity detection
+    if (Math.abs(curr.x - end.x) < 20 && Math.abs(curr.y - end.y) < 20) { 
+      finalNode = curr; 
+      break; 
+    }
+    
     if (closedSet.has(key)) continue;
     closedSet.add(key);
 
     const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
     for (const d of dirs) {
+      // Prevent immediate backtracking
       if (curr.direction && d.x === -curr.direction.x && d.y === -curr.direction.y) continue;
+      
       const n = { x: curr.x + d.x * GRID_SIZE, y: curr.y + d.y * GRID_SIZE };
-      if (closedSet.has(`${n.x},${n.y}`)) continue;
-      if (isInsideTileExclusion(n, tiles, start, end)) continue;
+      const nKey = `${n.x},${n.y}`;
+      if (closedSet.has(nKey)) continue;
 
-      const turn = (curr.direction && (d.x !== curr.direction.x || d.y !== curr.direction.y)) ? TURN_PENALTY : 0;
-      const g = curr.g + GRID_SIZE + turn;
-      const f = g + Math.abs(n.x - end.x) + Math.abs(n.y - end.y);
+      // Solid Obstacle Avoidance
+      const isBlocked = isInsideTileExclusion(n, tiles, start, end);
+      if (isBlocked && !isRecursion) continue; 
+      
+      const obstacleCost = isBlocked ? OBSTACLE_PENALTY : 0;
+      const turnCost = (curr.direction && (d.x !== curr.direction.x || d.y !== curr.direction.y)) ? TURN_PENALTY : 0;
+      
+      // Smart Congestion Awareness (Pseudo-parallel avoidance)
+      // If we are recursion, we strongly avoid the grid's main y-trunk
+      const recursionPenalty = (isRecursion && Math.abs(n.x - snapToGrid(start.x, 16)) < 64) ? 400 : 0;
+
+      const g = curr.g + GRID_SIZE + turnCost + obstacleCost + recursionPenalty;
+      const f = g + getH(n);
       openSet.push({ ...n, g, f, parent: curr, direction: d });
     }
   }
@@ -99,7 +161,10 @@ export const getSmartPath = (sX: number, sY: number, tX: number, tY: number, sou
   if (finalNode) {
     let curr: AStarNode | null = finalNode;
     const temp: Point[] = [];
-    while (curr) { temp.unshift({ x: curr.x, y: curr.y }); curr = curr.parent; }
+    while (curr) { 
+      temp.unshift({ x: curr.x, y: curr.y }); 
+      curr = curr.parent; 
+    }
     pathPoints.push(...temp);
   }
   pathPoints.push(end);
