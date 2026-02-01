@@ -197,19 +197,12 @@ export default function App() {
         const visited = new Set<string>();
         const occupied = new Set<string>();
 
-        const isPositionOccupied = (x: number, y: number) => {
-            const key = `${Math.round(x)},${Math.round(y)}`;
-            return occupied.has(key);
-        };
-
-        const markOccupied = (x: number, y: number) => {
-            occupied.add(`${Math.round(x)},${Math.round(y)}`);
-        };
+        const getPosKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
 
         const findSafePosition = (startX: number, startY: number, stepX: number, stepY: number) => {
             let tx = startX, ty = startY;
             let safety = 0;
-            while (isPositionOccupied(tx, ty) && safety < 1000) {
+            while (occupied.has(getPosKey(tx, ty)) && safety < 1000) {
                 tx += stepX;
                 ty += stepY;
                 safety++;
@@ -218,14 +211,26 @@ export default function App() {
         };
 
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
-        const roots = newItems.filter(i => i.isOrigin || !incomingTargetIds.has(i.instanceId));
+        // Roots are only nodes with no incoming connections. 
+        // Fuchsia providers to the entry point will naturally be roots.
+        const roots = newItems.filter(i => !incomingTargetIds.has(i.instanceId));
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
+            visited.add(nodeId);
+            occupied.add(getPosKey(cx, cy));
+            
+            const node = newItems.find(i => i.instanceId === nodeId);
+            if (node) {
+              node.x = cx;
+              node.y = cy;
+            }
+
             const outgoing = connections.filter(c => c.sourceId === nodeId);
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+                // Reduced tether distance (1.5x grid)
+                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
                 let tx = cx, ty = cy;
 
                 if (conn.sourceSide === 'bottom') ty += step;
@@ -233,9 +238,9 @@ export default function App() {
                 else if (conn.sourceSide === 'left') tx -= step;
                 else if (conn.sourceSide === 'top') ty -= step;
 
+                // Extra buffer for recursive lines
                 if (isAncestor(conn.targetId, nodeId, connections)) {
-                  if (mode === 'grid') ty += GRID_SIZE * 2;
-                  else ty += GRID_SIZE * 3;
+                  ty += step * 2;
                 }
 
                 const { tx: finalX, ty: finalY } = findSafePosition(
@@ -245,24 +250,27 @@ export default function App() {
                     GRID_SIZE
                 );
 
-                const target = newItems.find(i => i.instanceId === conn.targetId);
-                if (target) {
-                    target.x = finalX; target.y = finalY;
-                    visited.add(target.instanceId); markOccupied(finalX, finalY);
-                    processNode(target.instanceId, finalX, finalY);
-                }
+                processNode(conn.targetId, finalX, finalY);
             });
         };
 
         const centerX = snapToGrid(windowSize.w / 2 - 16, 0);
-        let currentY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
+        let startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
-        roots.sort((a,b) => (a.isOrigin ? -1 : 1)).forEach((root) => {
-            const { tx, ty } = findSafePosition(centerX, currentY, 0, GRID_SIZE * 2);
-            root.x = tx; root.y = ty;
-            visited.add(root.instanceId); markOccupied(tx, ty);
+        // Sort roots to prioritize the main tree containing the Origin
+        const sortedRoots = [...roots].sort((a, b) => {
+          const aLeadsToOrigin = a.isOrigin || isAncestor(a.instanceId, 'entry_origin', connections);
+          const bLeadsToOrigin = b.isOrigin || isAncestor(b.instanceId, 'entry_origin', connections);
+          if (aLeadsToOrigin && !bLeadsToOrigin) return -1;
+          if (!aLeadsToOrigin && bLeadsToOrigin) return 1;
+          return 0;
+        });
+
+        sortedRoots.forEach((root) => {
+            if (visited.has(root.instanceId)) return;
+            const { tx, ty } = findSafePosition(centerX, startY, 0, GRID_SIZE * 2);
             processNode(root.instanceId, tx, ty);
-            currentY = ty + (mode === 'grid' ? GRID_SIZE : GRID_SIZE * 3);
+            startY = ty + (mode === 'grid' ? GRID_SIZE * 2 : GRID_SIZE * 3);
         });
 
         const origin = newItems.find(i => i.isOrigin);
@@ -325,7 +333,7 @@ export default function App() {
       const clientY = 'clientY' in e ? e.clientY : (e as TouchEvent).touches[0].clientY;
       
       if (dragStartPos && !isDragging) {
-          const dist = Math.sqrt(Math.pow(clientX - dragStartPos.x, 2) + Math.pow(clientY - dragStartPos.y, 2));
+          const dist = Math.sqrt(Math.pow(clientX - dragStartPos.x, 2) + Math.pow(clientX - dragStartPos.y, 2));
           if (dist > DRAG_THRESHOLD) { 
             setIsDragging(true); 
             setDraggingId(dragStartPos.id); 
@@ -484,15 +492,13 @@ export default function App() {
                                   const myY = item.y + lp.y * 32;
                                   const itsX = otherItem.x + otherLp.x * 32;
                                   const itsY = otherItem.y + otherLp.y * 32;
-                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
+                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(itsX - myX, 2));
 
-                                  // Culling Logic: Hide input dot if snapped, but Fuchsia is exempt.
                                   if (dist < 24 && !isFuchsia) {
                                     opacityClass = 'opacity-0 scale-50';
                                   }
                                 }
                               } else {
-                                // Source/Parent Port Logic
                                 const otherId = connection.targetId;
                                 const otherSide = connection.targetSide;
                                 const otherItem = canvasItems.find(i => i.instanceId === otherId);
@@ -503,12 +509,11 @@ export default function App() {
                                   const myY = item.y + lp.y * 32;
                                   const itsX = otherItem.x + otherLp.x * 32;
                                   const itsY = otherItem.y + otherLp.y * 32;
-                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
+                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(itsX - myX, 2));
 
                                   const hasIncomingFlow = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top');
                                   const isIsolatedInput = item.isOrigin || !hasIncomingFlow;
 
-                                  // If snapped and it's an isolated input (Origin/Trigger), hide the source (Green) dot too
                                   if (dist < 24 && lp.id === 'bottom' && isIsolatedInput) {
                                     opacityClass = 'opacity-0 scale-50';
                                   }
