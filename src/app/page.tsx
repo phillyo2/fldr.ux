@@ -262,8 +262,16 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
+                
+                // Identify if this is a standard "blue" execution flow (recursion or main branch)
+                const isBlue = !conn.color.includes('emerald') && !conn.color.includes('rose') && !conn.color.includes('amber') && !conn.color.includes('fuchsia');
+                
                 let step = (mode === 'grid' && conn.sourceSide !== 'bottom') ? GRID_SIZE : GRID_SIZE * 2;
-                if (mode === 'grid' && conn.sourceSide === 'bottom') step = GRID_SIZE;
+                if (mode === 'grid' && conn.sourceSide === 'bottom') {
+                  // If it's a blue recursion/flow line, unsnap from the grid by putting one cell block in between (step = 64)
+                  // If it's emerald/success, it stays snapped (step = 32)
+                  step = isBlue ? GRID_SIZE * 2 : GRID_SIZE;
+                }
 
                 if (conn.sourceSide === 'bottom') ty += step;
                 else if (conn.sourceSide === 'right') tx += step;
