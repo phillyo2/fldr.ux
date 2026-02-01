@@ -388,10 +388,13 @@ export default function App() {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
                         
-                        // Fusion Logic: Hide line when flush at connection side
-                        const isAdjacent = (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
-                                           (conn.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
-                                           (conn.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y);
+                        // Fusion Logic: Hide line when flush at connection side (EXCEPT FOR RECURSION)
+                        const isRecursive = conn.color.includes('blue');
+                        const isAdjacent = !isRecursive && (
+                           (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                           (conn.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                           (conn.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y)
+                        );
 
                         if (isAdjacent) return null;
 
@@ -409,9 +412,12 @@ export default function App() {
                         const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === activeTether.targetId);
                         if (!s || !t) return null;
 
-                        const isAdjacent = (activeTether.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
-                                           (activeTether.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
-                                           (activeTether.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y);
+                        const isRecursive = activeTether.color.includes('blue');
+                        const isAdjacent = !isRecursive && (
+                           (activeTether.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                           (activeTether.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                           (activeTether.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y)
+                        );
 
                         if (isAdjacent) return null;
 
@@ -445,9 +451,12 @@ export default function App() {
                     const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                     if(!s || !t) return null;
                     
-                    const isAdjacent = (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
-                                       (conn.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
-                                       (conn.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y);
+                    const isRecursive = conn.color.includes('blue');
+                    const isAdjacent = !isRecursive && (
+                       (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                       (conn.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                       (conn.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y)
+                    );
 
                     if (isAdjacent) return null;
 
@@ -471,7 +480,7 @@ export default function App() {
                     )
                 })}
 
-                {/* PASS 1: Child Ports (Inputs - Blue) - Hides on fusion */}
+                {/* PASS 1: Child Ports (Inputs - Blue) - Hides on fusion (EXCEPT RECURSION) */}
                 {canvasItems.map(item => (
                     <div key={`latch_inputs_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1001]' : 'z-20'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type === 'input').map(lp => {
@@ -480,15 +489,19 @@ export default function App() {
                           
                           const s = incomingLink ? canvasItems.find(i => i.instanceId === incomingLink.sourceId) : null;
                           const t = item;
-                          const isFused = s && ((incomingLink?.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
-                                               (incomingLink?.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
-                                               (incomingLink?.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y));
+                          
+                          const isRecursive = incomingLink?.color.includes('blue');
+                          const isFused = !isRecursive && s && (
+                             (incomingLink?.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                             (incomingLink?.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                             (incomingLink?.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y)
+                          );
 
                           const isConnected = !!incomingLink;
                           const isGuidance = !!ghost || activeTether?.targetId === item.instanceId;
-                          // Input dot disappears if fused
+                          // Input dot disappears if fused (non-recursive)
                           const isVisible = (isGuidance || isConnected) && !isFused;
-                          const c = lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300';
+                          const c = isRecursive ? 'bg-blue-500' : (lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300');
                           return (
                             <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2000]
                                     ${isConnected ? c : 'bg-slate-300'}
