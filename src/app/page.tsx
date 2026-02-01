@@ -263,13 +263,12 @@ export default function App() {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
                 
-                // Identify if this is a standard "blue" execution flow (recursion or main branch)
+                // Identify if this is a standard "blue" execution flow
                 const isBlue = !conn.color.includes('emerald') && !conn.color.includes('rose') && !conn.color.includes('amber') && !conn.color.includes('fuchsia');
                 
+                // For Blue connections in Grid Mode: Always enforce a one-cell block in between (64px total center-to-center)
                 let step = (mode === 'grid' && conn.sourceSide !== 'bottom') ? GRID_SIZE : GRID_SIZE * 2;
                 if (mode === 'grid' && conn.sourceSide === 'bottom') {
-                  // If it's a blue recursion/flow line, unsnap from the grid by putting one cell block in between (step = 64)
-                  // If it's emerald/success, it stays snapped (step = 32)
                   step = isBlue ? GRID_SIZE * 2 : GRID_SIZE;
                 }
 
@@ -441,6 +440,8 @@ export default function App() {
                           const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
                           const isFuchsia = conn.color.includes('fuchsia');
                           const isEmerald = conn.color.includes('emerald');
+                          
+                          // Hide line if items are directly adjacent, UNLESS they are execution-critical (Emerald/Fuchsia)
                           if (!isFuchsia && !isEmerald && dist < 48) return null;
 
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
@@ -516,7 +517,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Grid-Snapped Action Tiles - Offset by 28px */}
+      {/* Discrete Grid-Snapped Action Tiles - Fixed 28px Offset */}
       <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <LayoutGrid size={20} className="text-slate-600" />
       </div>
