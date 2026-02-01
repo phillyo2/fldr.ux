@@ -281,9 +281,60 @@ export default function App() {
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
-    const spawnX = snapToGrid(-viewOffset.x + windowSize.w / 2 - 16, 0);
-    const spawnY = snapToGrid(-viewOffset.y + windowSize.h / 2 - 16, HEADER_OFFSET);
-    setCanvasItems(prev => [...prev, { ...item, instanceId: `inst_${Date.now()}`, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem]);
+    // Proximity Spawning Logic:
+    // 1. Identify Leaf Nodes (no outgoing connections)
+    const outgoingSourceIds = new Set(connections.map(c => c.sourceId));
+    const leafNodes = canvasItems.filter(i => !outgoingSourceIds.has(i.instanceId));
+
+    // 2. Calculate current screen center in canvas space
+    const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
+    const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
+
+    let spawnX, spawnY;
+
+    if (leafNodes.length > 0) {
+      // 3. Find the leaf node closest to the screen center
+      let closestLeaf = leafNodes[0];
+      let minDist = Infinity;
+
+      leafNodes.forEach(node => {
+        const dx = node.x - screenCenterX;
+        const dy = node.y - screenCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < minDist) {
+          minDist = dist;
+          closestLeaf = node;
+        }
+      });
+
+      // 4. Position new tile two grid units below the nearest leaf
+      spawnX = snapToGrid(closestLeaf.x, 0);
+      spawnY = snapToGrid(closestLeaf.y + GRID_SIZE * 2, HEADER_OFFSET);
+    } else {
+      // Fallback if no leaf nodes found
+      spawnX = snapToGrid(screenCenterX - 16, 0);
+      spawnY = snapToGrid(screenCenterY - 16, HEADER_OFFSET);
+    }
+
+    // Basic collision avoidance
+    const occupied = new Set(canvasItems.map(i => `${Math.round(i.x)},${Math.round(i.y)}`));
+    let safety = 0;
+    while (occupied.has(`${Math.round(spawnX)},${Math.round(spawnY)}`) && safety < 10) {
+      spawnY += GRID_SIZE;
+      safety++;
+    }
+
+    const newInstanceId = `inst_${Date.now()}`;
+    const newItem = { ...item, instanceId: newInstanceId, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem;
+    
+    setCanvasItems(prev => [...prev, newItem]);
+
+    // 5. Pan the view to center the new node
+    setViewOffset({
+      x: windowSize.w / 2 - (spawnX + 16) * zoom,
+      y: windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom
+    });
+
     setActiveFolderView(null);
   };
 
