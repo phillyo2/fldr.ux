@@ -20,6 +20,7 @@ export default function App() {
   const [activeFolderView, setActiveFolderView] = useState<'nav' | 'toolbox' | null>(null);
   const [windowSize, setWindowSize] = useState({ w: 1024, h: 768 });
   const [isReady, setIsReady] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'tether'>('grid');
   
   const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]); 
@@ -87,7 +88,7 @@ export default function App() {
     setWindowSize({ w, h });
     
     const centerX = snapToGrid(w / 2 - 16, 0);
-    const startY = snapToGrid(h * 0.25 + HEADER_OFFSET, HEADER_OFFSET);
+    const startY = snapToGrid(h * 0.4 + HEADER_OFFSET, HEADER_OFFSET);
     
     setCanvasItems([
       { instanceId: 'entry_origin', name: 'Entry Point', icon: 'Shield', x: centerX, y: startY, isRegistered: true, isOrigin: true }
@@ -208,7 +209,8 @@ export default function App() {
     return ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
   };
 
-  const gatherLayout = (mode: 'grid' | 'tether' = 'grid') => {
+  const gatherLayout = (mode: 'grid' | 'tether') => {
+    setLayoutMode(mode);
     setCanvasItems(prev => {
         const newItems = prev.map(item => ({ ...item }));
         const visited = new Set<string>();
@@ -260,9 +262,8 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
-                // Success paths (bottom) should always use at least 2 blocks to maintain definition
+                // GRID mode uses strict 1-block steps. TETHER mode uses breathable 2-block steps.
                 let step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
-                if (conn.sourceSide === 'bottom') step = Math.max(step, GRID_SIZE * 2);
 
                 if (conn.sourceSide === 'bottom') ty += step;
                 else if (conn.sourceSide === 'right') tx += step;
@@ -375,12 +376,8 @@ export default function App() {
       const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
       const best = ghosts[0] as any;
       
-      if (best && best.dotDistance < SNAP_TOLERANCE) {
+      if (best && (activeTether || best.dotDistance < SNAP_TOLERANCE)) {
         setActiveTether({ ...best });
-      } else if (activeTether) {
-        if (best) {
-          setActiveTether({ ...best });
-        }
       }
     };
 
@@ -433,7 +430,7 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           
-                          // Spacing refinement: Hide standard adjacent lines to prevent clutter, but ALWAYS show emerald (success) and fuchsia (recursion)
+                          // Emerald and Fuchsia paths are persistent. Blue culled when adjacent.
                           const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
                           const isFuchsia = conn.color.includes('fuchsia');
                           const isEmerald = conn.color.includes('emerald');
@@ -513,24 +510,22 @@ export default function App() {
       </main>
 
       {/* Discrete Grid-Snapped Command Cluster (Top Right) */}
-      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-0">
+      <div className="fixed top-32 right-32 z-[1000] flex flex-col gap-0">
          <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><LayoutGrid size={20} className="text-slate-600" /></div>
          <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Waypoints size={20} className="text-slate-600" /></div>
       </div>
 
       {/* Discrete Grid-Snapped Zoom Cluster (Center Right) */}
-      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col gap-0">
+      <div className="fixed top-1/2 right-32 -translate-y-1/2 z-[1000] flex flex-col gap-0">
          <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><Plus size={20} className="text-slate-700" /></button>
          <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Minus size={20} className="text-slate-700" /></button>
       </div>
 
-      {/* Discrete Grid-Snapped Toolbox Access (Bottom Left) */}
-      <div className="fixed bottom-8 left-8 z-[500]">
+      {/* Discrete Grid-Snapped Folders */}
+      <div className="fixed bottom-32 left-32 z-[500]">
          <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800"><Folder size={20} className="text-white" /></div>
       </div>
-      
-      {/* Discrete Grid-Snapped Navigator Access (Bottom Right) */}
-      <div className="fixed bottom-8 right-8 z-[500]">
+      <div className="fixed bottom-32 right-32 z-[500]">
         <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700"><Compass size={20} className="text-white" /></div>
       </div>
 
