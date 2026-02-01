@@ -1,121 +1,94 @@
 
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import { SafeIcon } from './SafeIcon';
-import { ChevronUp, ChevronDown } from 'lucide-react';
-import { FolderData, CanvasItem } from '@/lib/types';
+import { ChevronLeft, X } from 'lucide-react';
+import { FolderItem } from '@/lib/types';
 import { ICON_SIZE } from '@/lib/constants';
 
 interface AndroidFolderProps {
-  fId?: string;
-  index?: number;
-  isMain?: boolean;
-  registry: Record<string, FolderData>;
-  activeView: string | null;
-  onOpen: (id: string | null) => void;
-  onLaunch?: (id: string) => void;
-  onBirth?: (item: Partial<CanvasItem>) => void;
-  windowSize: { w: number; h: number };
-  simulatedOffset: number;
-  isStackedItem?: boolean;
-  isDraggingDrawer?: boolean;
+  title: string;
+  icon: string;
+  color: string;
+  items: FolderItem[];
+  isOpen: boolean;
+  onClose: () => void;
+  onSelect: (item: FolderItem) => void;
 }
 
 export const AndroidFolder: React.FC<AndroidFolderProps> = ({ 
-  fId, 
-  index, 
-  isMain = false, 
-  registry, 
-  activeView, 
-  onOpen, 
-  onLaunch, 
-  onBirth, 
-  windowSize, 
-  simulatedOffset,
-  isStackedItem = false,
-  isDraggingDrawer = false
+  title, 
+  icon, 
+  color, 
+  items, 
+  isOpen, 
+  onClose,
+  onSelect
 }) => {
-    const data = isMain ? { icon: 'Zap', title: 'Launcher', color: 'bg-slate-900', items: [] } : (fId ? registry[fId] : null);
-    if (!data) return null;
+    const [path, setPath] = useState<FolderItem[]>([]);
     
-    const isExpanded = activeView === (isMain ? 'launcher' : fId);
-    
-    // Fix NaN by ensuring index is at least 0
-    const safeIndex = index ?? 0;
-    
-    // CSS-driven positioning:
-    // Collapsed: safeIndex * 4 (slight overlap)
-    // Expanded: safeIndex * 58 (full spread)
-    const stackSpread = simulatedOffset;
-    const bottomValue = isMain ? 40 : 40 + (safeIndex * stackSpread * 52) + (safeIndex * 6);
-    
-    // Using bottom instead of top for stability and performance
-    const style: React.CSSProperties = isExpanded 
-      ? { 
-          position: 'fixed', 
-          top: 0, 
-          left: 0, 
-          width: '100%', 
-          height: '100%', 
-          borderRadius: 0, 
-          zIndex: 500,
-          transition: 'all 0.08s ease-out' // Ultra-fast native speed
-        } 
-      : { 
-          position: 'fixed', 
-          bottom: `${bottomValue}px`, 
-          left: isMain ? 'auto' : '40px',
-          right: isMain ? '40px' : 'auto',
-          width: '48px', 
-          height: '48px', 
-          borderRadius: '0.75rem', 
-          zIndex: 100 - safeIndex,
-          transition: isDraggingDrawer ? 'none' : 'bottom 0.1s cubic-bezier(0, 0, 0.2, 1), transform 0.08s ease-out'
-        };
+    if (!isOpen) return null;
+
+    const currentItems = path.length > 0 ? path[path.length - 1].items || [] : items;
+    const currentTitle = path.length > 0 ? path[path.length - 1].name : title;
+
+    const handleBack = () => {
+      setPath(prev => prev.slice(0, -1));
+    };
 
     return (
-      <div 
-        style={style}
-        className={`shadow-2xl overflow-hidden ${isExpanded ? 'bg-white/95 backdrop-blur-3xl' : `${data.color} cursor-pointer border-t border-white/20`} flex items-center justify-center text-white group`} 
-        onClick={(e) => { e.stopPropagation(); if (isExpanded) return; onOpen(isMain ? 'launcher' : (fId || null)); }}>
-        
-        {!isMain && !isExpanded && safeIndex === 0 && (
-            <div className="absolute -top-10 left-1/2 -translate-x-1/2 text-slate-400 group-hover:text-slate-600 transition-colors pointer-events-none flex flex-col items-center">
-                {simulatedOffset < 0.5 ? (
-                  <div className="animate-bounce flex flex-col items-center">
-                    <ChevronUp size={20} className="stroke-[3]" />
-                    <span className="text-[7px] font-black uppercase tracking-[0.2em] -mt-1 bg-white/80 px-1 rounded shadow-sm border border-slate-100">Pull</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center opacity-70">
-                    <ChevronDown size={20} className="stroke-[3]" />
-                    <span className="text-[7px] font-black uppercase tracking-[0.2em] -mt-1 bg-white/80 px-1 rounded shadow-sm border border-slate-100">Push</span>
-                  </div>
-                )}
-            </div>
-        )}
-
-        <div className={`absolute transition-all duration-100 flex items-center justify-center z-50 ${isExpanded ? 'top-12 left-12 w-16 h-16 bg-slate-100 rounded-2xl text-blue-600 shadow-md' : 'inset-0'}`} onClick={(e) => { if(isExpanded) { e.stopPropagation(); onOpen(null); } }}>
-          <SafeIcon name={data.icon} fill={isExpanded ? "none" : "currentColor"} size={ICON_SIZE} />
-        </div>
-        
-        <div className={`w-full h-full p-8 pt-32 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-8 content-start justify-items-center transition-all duration-100 ${isExpanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
-           { (isMain ? [{id:'studio', name:'Studio', icon:'LayoutTemplate'}, {id:'home', name:'Dashboard', icon:'Home'}] : (data.items || [])).map((item, i) => (
-              <div key={i} className="flex flex-col items-center group cursor-pointer active:scale-95 transition-all" onClick={(e) => { e.stopPropagation(); if (isMain && onLaunch) onLaunch(item.id!); else if (onBirth) onBirth(item); }}>
-                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-sm ${isMain ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 group-hover:bg-blue-600 group-hover:text-white'}`}>
-                    <SafeIcon name={item.icon || 'Zap'} size={ICON_SIZE} />
-                </div>
-                <span className="mt-3 text-[10px] font-black uppercase text-slate-400 group-hover:text-slate-900 text-center truncate w-full">{item.name}</span>
+      <div className="fixed inset-0 z-[1000] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl border border-slate-100 flex flex-col max-h-[80vh]">
+          {/* Header */}
+          <div className={`${color} p-6 text-white flex items-center justify-between`}>
+            <div className="flex items-center gap-4">
+              {path.length > 0 && (
+                <button onClick={handleBack} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                  <ChevronLeft size={20} />
+                </button>
+              )}
+              <div className="flex items-center gap-3">
+                <SafeIcon name={path.length > 0 ? (path[path.length - 1].icon || 'Folder') : icon} size={20} />
+                <span className="font-black uppercase tracking-widest text-xs">{currentTitle}</span>
               </div>
-           ))}
-        </div>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+              <X size={20} />
+            </button>
+          </div>
 
-        { !isMain && isExpanded && (
-             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 opacity-50 cursor-pointer" onClick={() => onOpen(null)}>
-                 <ChevronDown size={32} className="stroke-[3]" />
-             </div>
-        )}
+          {/* Grid Content */}
+          <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-6 justify-items-center">
+              {currentItems.map((item, i) => (
+                <div 
+                  key={i} 
+                  className="flex flex-col items-center group cursor-pointer active:scale-95 transition-all w-20"
+                  onClick={() => {
+                    if (item.isFolder) {
+                      setPath(prev => [...prev, item]);
+                    } else {
+                      onSelect(item);
+                    }
+                  }}
+                >
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-sm ${item.isFolder ? 'bg-slate-200 text-slate-500' : 'bg-white text-slate-400 group-hover:bg-blue-600 group-hover:text-white border border-slate-100'}`}>
+                    <SafeIcon name={item.icon || (item.isFolder ? 'Folder' : 'Zap')} size={20} />
+                  </div>
+                  <span className="mt-2 text-[8px] font-black uppercase text-slate-400 group-hover:text-slate-900 text-center truncate w-full tracking-tighter">
+                    {item.name}
+                  </span>
+                </div>
+              ))}
+              {currentItems.length === 0 && (
+                <div className="col-span-full py-12 text-center text-slate-300 font-black uppercase text-[10px] tracking-widest italic">
+                  Folder is Empty
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     );
 };

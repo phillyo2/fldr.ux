@@ -11,6 +11,17 @@ export interface LatchPoint {
   type: 'input' | 'flow' | 'peek';
 }
 
+export interface FolderItem {
+  name: string;
+  icon: string;
+  id?: string;
+  isFolder?: boolean;
+  isBuilder?: boolean;
+  isTrigger?: boolean;
+  items?: FolderItem[];
+  color?: string;
+}
+
 export interface CanvasItem {
   instanceId: string;
   name: string;
@@ -46,5 +57,5 @@ export interface FolderData {
   title: string;
   icon: string;
   color: string;
-  items: Partial<CanvasItem>[];
+  items: FolderItem[];
 }
