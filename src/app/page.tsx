@@ -101,7 +101,7 @@ export default function App() {
     setIsReady(true);
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => window.removeResizeListener && window.removeEventListener('resize', handleResize);
   }, []);
 
   const deleteConnection = (id: string) => {
@@ -121,9 +121,8 @@ export default function App() {
 
       const outgoing = currentConnections.filter(c => c.sourceId === id);
       for (const conn of outgoing) {
-        const nextContext = conn.sourceSide === 'left' ? `sub_${conn.targetId}` : context;
-        contexts.set(conn.targetId, nextContext);
-        queue.push({id: conn.targetId, context: nextContext});
+        contexts.set(conn.targetId, context);
+        queue.push({id: conn.targetId, context: context});
       }
     }
     return contexts.get(nodeId) || null;
@@ -146,8 +145,6 @@ export default function App() {
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
-      
-      // FIX: Define otherCtx before it is used in the condition
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
 
       LATCH_POINTS.forEach(lSource => {
@@ -212,7 +209,7 @@ export default function App() {
         const findSafePosition = (startX: number, startY: number, stepX: number, stepY: number) => {
             let tx = startX, ty = startY;
             let safety = 0;
-            while (isPositionOccupied(tx, ty) && safety < 500) {
+            while (isPositionOccupied(tx, ty) && safety < 1000) {
                 tx += stepX;
                 ty += stepY;
                 safety++;
@@ -228,19 +225,24 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
-
+                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
                 let tx = cx, ty = cy;
+
                 if (conn.sourceSide === 'bottom') ty += step;
                 else if (conn.sourceSide === 'right') tx += step;
                 else if (conn.sourceSide === 'left') tx -= step;
                 else if (conn.sourceSide === 'top') ty -= step;
 
+                if (isAncestor(conn.targetId, nodeId, connections)) {
+                  if (mode === 'grid') ty += GRID_SIZE * 2;
+                  else ty += GRID_SIZE * 3;
+                }
+
                 const { tx: finalX, ty: finalY } = findSafePosition(
                     snapToGrid(tx, 0), 
                     snapToGrid(ty, HEADER_OFFSET), 
-                    mode === 'grid' ? GRID_SIZE : 0, 
-                    mode === 'grid' ? 0 : GRID_SIZE
+                    0, 
+                    GRID_SIZE
                 );
 
                 const target = newItems.find(i => i.instanceId === conn.targetId);
@@ -252,28 +254,18 @@ export default function App() {
             });
         };
 
-        let islandOffsetY = 0;
-        const origin = roots.find(r => r.isOrigin);
-        const islands = roots.filter(r => !r.isOrigin);
+        const centerX = snapToGrid(windowSize.w / 2 - 16, 0);
+        let currentY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
-        if (origin) {
-            const startX = snapToGrid(windowSize.w / 2 - 16, 0);
-            const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
-            origin.x = startX; origin.y = startY;
-            visited.add(origin.instanceId); markOccupied(startX, startY);
-            processNode(origin.instanceId, startX, startY);
-        }
-
-        islands.forEach((root) => {
-            const startX = snapToGrid(windowSize.w / 2 - 160, 0);
-            const startY = snapToGrid(windowSize.h * 0.4 + islandOffsetY, HEADER_OFFSET);
-            const { tx, ty } = findSafePosition(startX, startY, 0, mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5);
+        roots.sort((a,b) => (a.isOrigin ? -1 : 1)).forEach((root) => {
+            const { tx, ty } = findSafePosition(centerX, currentY, 0, GRID_SIZE * 2);
             root.x = tx; root.y = ty;
             visited.add(root.instanceId); markOccupied(tx, ty);
             processNode(root.instanceId, tx, ty);
-            islandOffsetY += mode === 'grid' ? 64 : 48;
+            currentY = ty + (mode === 'grid' ? GRID_SIZE : GRID_SIZE * 3);
         });
 
+        const origin = newItems.find(i => i.isOrigin);
         if (origin) {
             const vx = - (origin.x - (windowSize.w / 2) + 16);
             const vy = - (origin.y - (windowSize.h / 2) + 16);

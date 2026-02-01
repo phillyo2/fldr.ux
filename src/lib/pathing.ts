@@ -9,7 +9,6 @@ import { CanvasItem, Connection } from './types';
 const GRID_SIZE = 32;
 const TURN_PENALTY = 60;
 const OBSTACLE_PENALTY = 5000;
-const CONGESTION_PENALTY = 200;
 
 export const snapToGrid = (val: number, offset = 0, gridSize = GRID_SIZE) =>
   Math.round((val - offset) / gridSize) * gridSize + offset;
@@ -139,9 +138,8 @@ export const getSmartPath = (
       
       const obstacleCost = isBlocked ? OBSTACLE_PENALTY : 0;
       const turnCost = (curr.direction && (d.x !== curr.direction.x || d.y !== curr.direction.y)) ? TURN_PENALTY : 0;
-      const recursionPenalty = (isRecursion && Math.abs(n.x - snapToGrid(start.x, 16)) < 64) ? 400 : 0;
 
-      const g = curr.g + GRID_SIZE + turnCost + obstacleCost + recursionPenalty;
+      const g = curr.g + GRID_SIZE + turnCost + obstacleCost;
       const f = g + getH(n);
       openSet.push({ ...n, g, f, parent: curr, direction: d });
     }
