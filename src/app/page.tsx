@@ -508,27 +508,25 @@ export default function App() {
         </div>
       </main>
 
-      {/* Grid-Snapped Action Tiles (Top Right) - Offset by 30px */}
-      <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[30px] right-[30px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
+      {/* Grid-Snapped Action Tiles - Offset by 28px */}
+      <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <LayoutGrid size={20} className="text-slate-600" />
       </div>
-      <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="fixed top-[62px] right-[30px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
+      <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <Waypoints size={20} className="text-slate-600" />
       </div>
 
-      {/* Grid-Snapped Zoom Tiles (Center Right) - Offset by 30px from right */}
-      <div onClick={handleZoomIn} title="Zoom In" className="fixed top-[calc(50vh-32px)] right-[30px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
+      <div onClick={handleZoomIn} title="Zoom In" className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <Plus size={20} className="text-slate-700" />
       </div>
-      <div onClick={handleZoomOut} title="Zoom Out" className="fixed top-[50vh] right-[30px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
+      <div onClick={handleZoomOut} title="Zoom Out" className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <Minus size={20} className="text-slate-700" />
       </div>
 
-      {/* Grid-Snapped Folder Tiles - Offset by 30px from bottom corners */}
-      <div onClick={() => setActiveFolderView('toolbox')} className="fixed bottom-[30px] left-[30px] z-[500] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800 p-0 box-border">
+      <div onClick={() => setActiveFolderView('toolbox')} className="fixed bottom-[28px] left-[28px] z-[500] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800 p-0 box-border">
         <Folder size={20} className="text-white" />
       </div>
-      <div onClick={() => setActiveFolderView('nav')} className="fixed bottom-[30px] right-[30px] z-[500] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700 p-0 box-border">
+      <div onClick={() => setActiveFolderView('nav')} className="fixed bottom-[28px] right-[28px] z-[500] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700 p-0 box-border">
         <Compass size={20} className="text-white" />
       </div>
 
