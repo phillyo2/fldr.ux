@@ -194,42 +194,58 @@ export default function App() {
     let spawnX = snapToGrid(viewCenterX - 16, 0);
     let spawnY = snapToGrid(viewCenterY - 16, HEADER_OFFSET);
 
-    // Smart Proximity System: Find nearest anchor point to the center of the screen
+    // Smart Proximity System: Find nearest OUTPUT anchor (Red/Green) to the center of the screen
     let nearestDist = Infinity;
     let targetX = spawnX;
     let targetY = spawnY;
 
+    // Filter latch points to only prioritize output ones (bottom = green, right = red)
+    const priorityPorts = LATCH_POINTS.filter(lp => lp.id === 'bottom' || lp.id === 'right');
+
     canvasItems.forEach(ci => {
-      LATCH_POINTS.forEach(lp => {
-        // World position of the port dot
+      priorityPorts.forEach(lp => {
         const px = ci.x + lp.x * 32;
         const py = ci.y - HEADER_OFFSET + lp.y * 32;
         const d = Math.sqrt(Math.pow(px - viewCenterX, 2) + Math.pow(py - viewCenterY, 2));
         
-        // If we found a closer anchor within reasonable reach
         if (d < nearestDist && d < 400) {
           nearestDist = d;
-          // Position nearby: exactly 2 stride units in the direction of the port
           const stride = GRID_SIZE * 2;
           if (lp.id === 'bottom') { targetX = ci.x; targetY = ci.y + stride; }
           else if (lp.id === 'right') { targetX = ci.x + stride; targetY = ci.y; }
-          else if (lp.id === 'top') { targetX = ci.x; targetY = ci.y - stride; }
-          else if (lp.id === 'left') { targetX = ci.x - stride; targetY = ci.y; }
         }
       });
     });
 
-    if (nearestDist < Infinity) {
-      spawnX = snapToGrid(targetX, 0);
-      spawnY = snapToGrid(targetY, HEADER_OFFSET);
+    let finalX = snapToGrid(targetX, 0);
+    let finalY = snapToGrid(targetY, HEADER_OFFSET);
+
+    // Occupancy Check: Ensure we don't spawn on top of another node
+    const isOccupied = (x: number, y: number) => canvasItems.some(i => Math.round(i.x) === Math.round(x) && Math.round(i.y) === Math.round(y));
+    
+    if (isOccupied(finalX, finalY)) {
+        let found = false;
+        let radius = 1;
+        while (!found && radius < 10) {
+            const offsets = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [-1, -1], [1, -1], [-1, 1]];
+            for (const [ox, oy] of offsets) {
+                const tx = finalX + ox * GRID_SIZE * radius;
+                const ty = finalY + oy * GRID_SIZE * radius;
+                if (!isOccupied(tx, ty)) {
+                    finalX = tx; finalY = ty;
+                    found = true; break;
+                }
+            }
+            radius++;
+        }
     }
 
     const newInstanceId = `inst_${Date.now()}`;
     const newItem = { 
       ...item, 
       instanceId: newInstanceId, 
-      x: spawnX, 
-      y: spawnY, 
+      x: finalX, 
+      y: finalY, 
       isRegistered: !item.isBuilder 
     } as CanvasItem;
     
@@ -238,8 +254,8 @@ export default function App() {
 
     // Smooth Soft Pan to the birthed tile
     setIsTransitioning(true);
-    const targetVX = windowSize.w / 2 - (spawnX + 16) * zoom;
-    const targetVY = windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom;
+    const targetVX = windowSize.w / 2 - (finalX + 16) * zoom;
+    const targetVY = windowSize.h / 2 - (finalY - HEADER_OFFSET + 16) * zoom;
     
     setViewOffset({ x: targetVX, y: targetVY });
     setTimeout(() => setIsTransitioning(false), 500);
