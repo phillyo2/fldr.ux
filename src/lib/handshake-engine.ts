@@ -3,8 +3,9 @@ import { LATCH_POINTS, DETECTION_RANGE } from './constants';
 import { isAncestor } from './pathing';
 
 /**
- * Handshake Engine v1.0
+ * Handshake Engine v1.1
  * Pure logic for node connections, tether colors, and port states.
+ * Rule enforced: Only one connection allowed per output anchor.
  */
 
 export const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
@@ -56,42 +57,56 @@ export const calculateGhostHandshakes = (
     const otherCtx = getTreeContext(other.instanceId, connections);
 
     LATCH_POINTS.forEach(lSource => {
-      const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
-      const sPos = getPortPos(dragNode, lSource.id);
-      const tPos = getPortPos(other, lTarget.id);
-      const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
+      // RULE: Only one connection per output anchor (bottom/right)
+      const isOutputAnchor = lSource.id === 'bottom' || lSource.id === 'right';
+      
+      // Check normal case: Dragging node is the source
+      if (isOutputAnchor && connections.some(c => c.sourceId === dId && c.sourceSide === lSource.id)) {
+        // This output is already occupied
+      } else {
+        const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
+        const sPos = getPortPos(dragNode, lSource.id);
+        const tPos = getPortPos(other, lTarget.id);
+        const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
 
-      if (dist < DETECTION_RANGE) {
-        let color = lSource.color.replace('bg-', '');
-        let valid = false;
-        if (!dragCtx && otherCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
-          const dragHasAnyConnection = connections.some(c => c.sourceId === dId || c.targetId === dId);
-          if (!dragHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
-        }
-        else if (dragCtx && !otherCtx && lSource.id !== 'top') { valid = true; }
-        else if (dragCtx && otherCtx && dragCtx === otherCtx) {
-          if (isAncestor(other.instanceId, dId, connections)) {
-            if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') { valid = true; color = 'blue-500'; }
+        if (dist < DETECTION_RANGE) {
+          let color = lSource.color.replace('bg-', '');
+          let valid = false;
+          if (!dragCtx && otherCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
+            const dragHasAnyConnection = connections.some(c => c.sourceId === dId || c.targetId === dId);
+            if (!dragHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
           }
+          else if (dragCtx && !otherCtx && lSource.id !== 'top') { valid = true; }
+          else if (dragCtx && otherCtx && dragCtx === otherCtx) {
+            if (isAncestor(other.instanceId, dId, connections)) {
+              if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') { valid = true; color = 'blue-500'; }
+            }
+          }
+          if (valid) ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
         }
-        if (valid) ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
       }
 
-      const sPosInv = getPortPos(other, lSource.id);
-      const tPosInv = getPortPos(dragNode, lTarget.id);
-      const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
-      if (distInv < DETECTION_RANGE) {
-        let color = lSource.color.replace('bg-', '');
-        let valid = false;
-        if (otherCtx && !dragCtx && lSource.id !== 'top') {
-          const dragHasAnyConnection = connections.some(c => c.sourceId === dId || c.targetId === dId);
-          if (!dragHasAnyConnection) valid = true;
+      // Check inverted case: Existing node (other) is the source
+      if (isOutputAnchor && connections.some(c => c.sourceId === other.instanceId && c.sourceSide === lSource.id)) {
+        // This output is already occupied
+      } else {
+        const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
+        const sPosInv = getPortPos(other, lSource.id);
+        const tPosInv = getPortPos(dragNode, lTarget.id);
+        const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
+        if (distInv < DETECTION_RANGE) {
+          let color = lSource.color.replace('bg-', '');
+          let valid = false;
+          if (otherCtx && !dragCtx && lSource.id !== 'top') {
+            const dragHasAnyConnection = connections.some(c => c.sourceId === dId || c.targetId === dId);
+            if (!dragHasAnyConnection) valid = true;
+          }
+          if (!otherCtx && dragCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
+             const otherHasAnyConnection = connections.some(c => c.sourceId === other.instanceId || c.targetId === other.instanceId);
+             if (!otherHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
+          }
+          if (valid) ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
         }
-        if (!otherCtx && dragCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
-           const otherHasAnyConnection = connections.some(c => c.sourceId === other.instanceId || c.targetId === other.instanceId);
-           if (!otherHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
-        }
-        if (valid) ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
       }
     });
   });
