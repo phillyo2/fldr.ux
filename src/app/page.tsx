@@ -46,7 +46,9 @@ export default function App() {
         { name: 'Logic', icon: 'Code2', isFolder: true, items: [
             { name: 'Circuit Breaker', icon: 'Shuffle', isBuilder: true }
         ] },
-        { name: 'Triggers', icon: 'Radio', isFolder: true, items: [] }
+        { name: 'Triggers', icon: 'Radio', isFolder: true, items: [
+            { name: 'Entry Point', icon: 'Shield', isTrigger: true, isBuilder: true }
+        ] }
       ] },
       { name: 'Modifiers', icon: 'Settings', isFolder: true, color: 'bg-amber-500', items: [
         { name: 'Env Vars', icon: 'Globe', isBuilder: true },
@@ -221,8 +223,9 @@ export default function App() {
             ...connections.map(c => c.targetId)
         ]);
 
-        const standalone = newItems.filter(i => !connIds.has(i.instanceId));
-        const inFlow = newItems.filter(i => connIds.has(i.instanceId));
+        // Treat Entry Points (isTrigger or isOrigin) as part of flows even if unconnected
+        const standalone = newItems.filter(i => !connIds.has(i.instanceId) && !i.isTrigger && !i.isOrigin);
+        const inFlow = newItems.filter(i => connIds.has(i.instanceId) || i.isTrigger || i.isOrigin);
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
         const roots = inFlow.filter(i => !incomingTargetIds.has(i.instanceId));
 
@@ -519,8 +522,8 @@ export default function App() {
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
                       className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                      <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
-                        {item.isOrigin ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />}
+                      <div className={`w-[30px] h-[30px] ${(item.isOrigin || item.isTrigger) ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${(item.isOrigin || item.isTrigger) ? 'border-slate-800' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
+                        {(item.isOrigin || item.isTrigger) ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />}
                         {LATCH_POINTS.map(lp => {
                           const connectedAsSource = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const connectedAsTarget = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
