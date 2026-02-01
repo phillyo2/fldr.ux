@@ -83,8 +83,8 @@ export default function App() {
   const [studioPayload, setStudioPayload] = useState("");
 
   useEffect(() => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    const h = typeof window !== 'undefined' ? window.innerHeight : 768;
     setWindowSize({ w, h });
     
     const centerX = snapToGrid(w / 2 - 16, 0);
@@ -262,8 +262,8 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
-                // GRID mode uses strict 1-block steps. TETHER mode uses breathable 2-block steps.
-                let step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+                let step = (mode === 'grid' && conn.sourceSide !== 'bottom') ? GRID_SIZE : GRID_SIZE * 2;
+                if (mode === 'grid' && conn.sourceSide === 'bottom') step = GRID_SIZE;
 
                 if (conn.sourceSide === 'bottom') ty += step;
                 else if (conn.sourceSide === 'right') tx += step;
@@ -289,7 +289,7 @@ export default function App() {
             root.x = startX; root.y = startY;
             visited.add(root.instanceId); occupied.add(`${startX},${startY}`);
             processNode(root.instanceId, startX, startY);
-            islandOffsetY += 128;
+            islandOffsetY += 192;
         });
 
         const origin = newItems.find(i => i.isOrigin);
@@ -430,7 +430,6 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           
-                          // Emerald and Fuchsia paths are persistent. Blue culled when adjacent.
                           const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
                           const isFuchsia = conn.color.includes('fuchsia');
                           const isEmerald = conn.color.includes('emerald');
@@ -509,24 +508,28 @@ export default function App() {
         </div>
       </main>
 
-      {/* Discrete Grid-Snapped Command Cluster (Top Right) */}
-      <div className="fixed top-32 right-32 z-[1000] flex flex-col gap-0">
-         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><LayoutGrid size={20} className="text-slate-600" /></div>
-         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Waypoints size={20} className="text-slate-600" /></div>
+      {/* Grid-Snapped Action Tiles (Top Right) */}
+      <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[32px] right-[32px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm">
+        <LayoutGrid size={20} className="text-slate-600" />
+      </div>
+      <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="fixed top-[64px] right-[32px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm">
+        <Waypoints size={20} className="text-slate-600" />
       </div>
 
-      {/* Discrete Grid-Snapped Zoom Cluster (Center Right) */}
-      <div className="fixed top-1/2 right-32 -translate-y-1/2 z-[1000] flex flex-col gap-0">
-         <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><Plus size={20} className="text-slate-700" /></button>
-         <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Minus size={20} className="text-slate-700" /></button>
+      {/* Grid-Snapped Zoom Tiles (Center Right) */}
+      <div onClick={handleZoomIn} title="Zoom In" className="fixed top-[calc(50vh-32px)] right-[32px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm">
+        <Plus size={20} className="text-slate-700" />
+      </div>
+      <div onClick={handleZoomOut} title="Zoom Out" className="fixed top-[50vh] right-[32px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm">
+        <Minus size={20} className="text-slate-700" />
       </div>
 
-      {/* Discrete Grid-Snapped Folders */}
-      <div className="fixed bottom-32 left-32 z-[500]">
-         <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800"><Folder size={20} className="text-white" /></div>
+      {/* Grid-Snapped Folder Tiles */}
+      <div onClick={() => setActiveFolderView('toolbox')} className="fixed bottom-[32px] left-[32px] z-[500] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800">
+        <Folder size={20} className="text-white" />
       </div>
-      <div className="fixed bottom-32 right-32 z-[500]">
-        <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700"><Compass size={20} className="text-white" /></div>
+      <div onClick={() => setActiveFolderView('nav')} className="fixed bottom-[32px] right-[32px] z-[500] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700">
+        <Compass size={20} className="text-white" />
       </div>
 
       <AndroidFolder title={navData.title} icon={navData.icon} color={navData.color} items={navData.items} isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
