@@ -93,12 +93,16 @@ export default function App() {
       if (curr === ancId) return true;
       if (visited.has(curr)) break;
       visited.add(curr);
-      // Standard flow connections only (ignore blue go-tos)
-      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('blue'));
+      // Only follow standard flow or subtree connections for ancestry
+      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('indigo'));
       if (!incoming) break;
       curr = incoming.sourceId;
     }
     return false;
+  };
+
+  const isExtraInput = (id: string): boolean => {
+    return connRef.current.some(c => c.sourceId === id && c.color.includes('indigo'));
   };
 
   const getTreeId = (id: string): string | null => {
@@ -113,9 +117,10 @@ export default function App() {
       if (!node) return null;
       if (node.isOrigin) return 'MAIN';
 
-      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('blue'));
+      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('indigo'));
       if (!incoming) return null;
 
+      // Subtree roots are identified by Amber (left) entry
       if (incoming.sourceSide === 'left') return curr;
 
       curr = incoming.sourceId;
@@ -137,7 +142,7 @@ export default function App() {
       const currId = queue.shift()!;
       const outgoing = connections.filter(c => c.sourceId === currId && 
         (c.sourceSide === 'bottom' || c.sourceSide === 'right') &&
-        !c.color.includes('blue')
+        !c.color.includes('indigo')
       );
       outgoing.forEach(conn => {
         if (!main.has(conn.targetId)) {
@@ -156,10 +161,17 @@ export default function App() {
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
 
+    // Extra Inputs are isolated and cannot have children
+    if (isExtraInput(dId)) return [];
+
     const dragTreeId = getTreeId(dId);
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
+      
+      // Cannot attach anything to an Extra Input tile
+      if (isExtraInput(other.instanceId)) return;
+
       const otherTreeId = getTreeId(other.instanceId);
 
       const dx = (dragNode.x || 0) - other.x;
@@ -167,10 +179,10 @@ export default function App() {
       const adx = Math.abs(dx);
       const ady = Math.abs(dy);
       
-      // Case 1: Standard Isolation Logic
       const isSameTree = (dragTreeId !== null && otherTreeId !== null && dragTreeId === otherTreeId);
       const isUnattachedToCanvas = (otherTreeId !== null && dragTreeId === null);
 
+      // Case 1: Standard Isolation Logic
       if (isSameTree || isUnattachedToCanvas) {
           // Success (Emerald): Below target
           if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
@@ -180,23 +192,30 @@ export default function App() {
           else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
           } 
-          // Subtree (Amber): Left of target (Always creates NEW isolation)
+          // Subtree (Amber): Left of target
           else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-            if (dragTreeId === null) {
-              ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
-            }
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
           }
       }
 
-      // Case 2: Recursion / Go-To (Dragged Node -> Canvas Ancestor)
+      // Case 2: Recursion / Go-To (Dragging descendant to ancestor)
       if (isSameTree && isAncestor(other.instanceId, dId)) {
-          // Go-To Success: Drag above target
+          // Go-To Emerald
           if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
              ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
           }
-          // Go-To Error: Drag left of target
+          // Go-To Rose
           else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
              ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'right', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+          }
+      }
+
+      // Case 3: Extra Inputs (Unattached node -> Any canvas node)
+      // This allows triggers or data providers to be "plugged in" as side-inputs
+      if (isUnattachedToCanvas && dragTreeId === null) {
+          // If dragging above any node, it can be an extra input
+          if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-indigo-500', displayColor: 'bg-indigo-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
           }
       }
     });
@@ -391,7 +410,10 @@ export default function App() {
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         
                         const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
-                        const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
+                        const c = conn.color.includes('rose') ? '#F43F5E' : 
+                                  conn.color.includes('emerald') ? '#10B981' : 
+                                  conn.color.includes('blue') ? '#3B82F6' : 
+                                  conn.color.includes('indigo') ? '#6366F1' : '#FBBF24';
                         return <path key={conn.id} d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" className="drop-shadow-sm" />;
                     })}
                     
@@ -404,7 +426,10 @@ export default function App() {
 
                         const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
-                        const c = activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('blue') ? '#3B82F6' : '#FBBF24';
+                        const c = activeTether.color.includes('rose') ? '#F43F5E' : 
+                                  activeTether.color.includes('emerald') ? '#10B981' : 
+                                  activeTether.color.includes('blue') ? '#3B82F6' : 
+                                  activeTether.color.includes('indigo') ? '#6366F1' : '#FBBF24';
                         
                         const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
                         return <path d={tetherPath.d} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
@@ -418,6 +443,7 @@ export default function App() {
                     <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border transition-all 
                       ${item.isOrigin ? 'border-blue-400 ring-1 ring-blue-50 shadow-blue-100' : (item.isRegistered ? 'border-slate-200 shadow-slate-100' : 'border-emerald-300 ring-1 ring-emerald-50 shadow-emerald-50')}
                       ${mainNodes.has(item.instanceId) ? 'shadow-emerald-200 ring-1 ring-emerald-100' : ''}
+                      ${isExtraInput(item.instanceId) ? 'border-indigo-400 ring-1 ring-indigo-50 shadow-indigo-100' : ''}
                     `}>
                       <SafeIcon name={item.icon} size={16} className={item.isRegistered ? (mainNodes.has(item.instanceId) ? 'text-slate-800' : 'text-slate-400') : 'text-emerald-500'} />
                     </div>
@@ -435,7 +461,10 @@ export default function App() {
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                     
                     const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
-                    const c = conn.color.includes('rose') ? 'bg-rose-500' : conn.color.includes('emerald') ? 'bg-emerald-500' : conn.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
+                    const c = conn.color.includes('rose') ? 'bg-rose-500' : 
+                               conn.color.includes('emerald') ? 'bg-emerald-500' : 
+                               conn.color.includes('blue') ? 'bg-blue-500' : 
+                               conn.color.includes('indigo') ? 'bg-indigo-500' : 'bg-amber-400';
                     return (
                         <div 
                           key={`ball_${conn.id}`} 
@@ -473,7 +502,7 @@ export default function App() {
                     </div>
                 ))}
 
-                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow) */}
+                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow, Indigo) */}
                 {canvasItems.map(item => (
                     <div key={`latch_parents_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1002]' : 'z-21'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type !== 'input').map(lp => {
@@ -484,7 +513,9 @@ export default function App() {
                           const isGuidance = !!ghost || activeTether?.sourceId === item.instanceId;
                           const isVisible = isGuidance || isConnected;
                           
-                          const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : 'bg-amber-400';
+                          const c = lp.color.includes('rose') ? 'bg-rose-500' : 
+                                    lp.color.includes('emerald') ? 'bg-emerald-500' : 
+                                    lp.color.includes('indigo') ? 'bg-indigo-500' : 'bg-amber-400';
 
                           return (
                             <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2001]
@@ -539,4 +570,3 @@ export default function App() {
     </div>
   );
 }
-
