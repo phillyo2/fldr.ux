@@ -85,7 +85,7 @@ export default function App() {
     const h = window.innerHeight;
     setWindowSize({ w, h });
     
-    // Position the origin node perfectly centered instantly
+    // Position the origin node perfectly centered horizontally instantly
     const centerX = snapToGrid(w / 2 - 16, 0);
     setCanvasItems(prev => prev.map(item => 
       item.isOrigin ? { ...item, x: centerX } : item
@@ -109,9 +109,7 @@ export default function App() {
       const visited = new Set<string>();
       const occupied = new Set<string>();
       
-      const GRID_STEP = 32;
-      const TETHER_STEP = 128; 
-      const step = mode === 'grid' ? GRID_STEP : 96;
+      const step = mode === 'grid' ? 32 : 96;
 
       // Start origin
       visited.add(origin.instanceId);
@@ -123,34 +121,26 @@ export default function App() {
         children.forEach(conn => {
           if (visited.has(conn.targetId)) return;
 
-          let tx = cx;
-          let ty = cy;
+          let found = false;
+          let safety = 0;
+          let searchDist = step;
+          let tx = cx, ty = cy;
 
-          if (conn.sourceSide === 'bottom') ty += step;
-          else if (conn.sourceSide === 'right') tx += step;
-          else if (conn.sourceSide === 'left') tx -= step;
-          else if (conn.sourceSide === 'top') ty -= step;
+          // Multi-step search to prevent overlaps
+          while (!found && safety < 15) {
+            let nextX = cx, nextY = cy;
+            if (conn.sourceSide === 'bottom') nextY += searchDist;
+            else if (conn.sourceSide === 'right') nextX += searchDist;
+            else if (conn.sourceSide === 'left') nextX -= searchDist;
+            else if (conn.sourceSide === 'top') nextY -= searchDist;
 
-          // Resolve collisions
-          if (mode === 'grid' && occupied.has(`${tx},${ty}`)) {
-            let searchDist = TETHER_STEP;
-            let found = false;
-            let safety = 0;
-            while (!found && safety < 10) {
-              let nx = cx, ny = cy;
-              if (conn.sourceSide === 'bottom') ny += searchDist;
-              else if (conn.sourceSide === 'right') nx += searchDist;
-              else if (conn.sourceSide === 'left') nx -= searchDist;
-              else if (conn.sourceSide === 'top') ny -= searchDist;
-              
-              if (!occupied.has(`${nx},${ny}`)) {
-                tx = nx; ty = ny;
-                found = true;
-              } else {
-                searchDist += GRID_STEP;
-              }
-              safety++;
+            if (!occupied.has(`${nextX},${nextY}`)) {
+              tx = nextX; ty = nextY;
+              found = true;
+            } else {
+              searchDist += 32; // Try pushing further out
             }
+            safety++;
           }
 
           const target = newItems.find(i => i.instanceId === conn.targetId);
@@ -166,7 +156,7 @@ export default function App() {
 
       processNode(origin.instanceId, origin.x, origin.y);
       
-      // Secondary pass for unattached nodes (like isolated inputs)
+      // Secondary pass for unattached nodes or isolated inputs
       newItems.forEach(item => {
         if (!visited.has(item.instanceId)) {
           const outgoing = connections.find(c => c.sourceId === item.instanceId && visited.has(c.targetId));
@@ -175,11 +165,20 @@ export default function App() {
             if (target) {
               item.x = target.x;
               
-              // Isolated inputs (fuchsia) should sit one block above the target in tether view (one cell box gap)
+              // Isolated inputs (fuchsia) should sit one cell block above the target in tether view (one cell box gap)
               const isIsolatedInput = outgoing.color.includes('fuchsia');
-              const offset = (mode === 'tether' && isIsolatedInput) ? 64 : 32;
-              item.y = target.y - offset;
+              const verticalOffset = (mode === 'tether' && isIsolatedInput) ? 64 : 32;
               
+              let finalY = target.y - verticalOffset;
+              
+              // Collision check for isolated input
+              let safety = 0;
+              while (occupied.has(`${item.x},${finalY}`) && safety < 5) {
+                finalY -= 32;
+                safety++;
+              }
+
+              item.y = finalY;
               visited.add(item.instanceId);
               occupied.add(`${item.x},${item.y}`);
             }
@@ -481,11 +480,10 @@ export default function App() {
                }} 
             />
 
-            {/* Permanent Layout Toggles */}
             <div className="fixed top-20 right-8 z-[100] flex flex-col gap-2">
               <div 
                 onClick={() => gatherLayout('grid')} 
-                title="Crossword View"
+                title="Grid View"
                 className="w-10 h-10 bg-white border border-slate-200 rounded-xl shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all group"
               >
                 <LayoutGrid size={20} className="text-slate-400 group-hover:text-primary transition-colors" />
