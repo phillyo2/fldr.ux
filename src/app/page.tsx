@@ -94,6 +94,16 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
+  const isAncestor = (ancId: string, descId: string): boolean => {
+    let curr = descId; const visited = new Set<string>();
+    while (curr) {
+      if (curr === ancId) return true; if (visited.has(curr)) break; visited.add(curr);
+      const incoming = connections.find(c => c.targetId === curr && !c.color.includes('fuchsia'));
+      if (!incoming) break; curr = incoming.sourceId;
+    }
+    return false;
+  };
+
   const gatherLayout = (mode: 'grid' | 'tether') => {
     setCanvasItems(prev => {
       const newItems = prev.map(item => ({ ...item }));
@@ -121,15 +131,21 @@ export default function App() {
         children.forEach(conn => {
           if (visited.has(conn.targetId)) return;
           let found = false, safety = 0, searchDist = step + minGap, tx = cx, ty = cy;
-          while (!found && safety < 15) {
-            let nextX = cx, nextY = cy;
-            if (conn.sourceSide === 'bottom') nextY += searchDist;
-            else if (conn.sourceSide === 'right') nextX += searchDist;
-            else if (conn.sourceSide === 'left') nextX -= searchDist;
-            else if (conn.sourceSide === 'top') nextY -= searchDist;
-            
-            if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += 32; }
-            safety++;
+          
+          // Special placement for isolated inputs (fuchsia) sitting one cell block above
+          if (conn.color.includes('fuchsia')) {
+            tx = cx; ty = cy - (32 + minGap);
+          } else {
+            while (!found && safety < 15) {
+              let nextX = cx, nextY = cy;
+              if (conn.sourceSide === 'bottom') nextY += searchDist;
+              else if (conn.sourceSide === 'right') nextX += searchDist;
+              else if (conn.sourceSide === 'left') nextX -= searchDist;
+              else if (conn.sourceSide === 'top') nextY -= searchDist;
+              
+              if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += 32; }
+              safety++;
+            }
           }
           const target = newItems.find(i => i.instanceId === conn.targetId);
           if (target) { target.x = tx; target.y = ty; visited.add(target.instanceId); occupied.add(`${tx},${ty}`); processNode(target.instanceId, tx, ty); }
@@ -137,89 +153,49 @@ export default function App() {
       };
       
       processNode(origin.instanceId, origin.x, origin.y);
-
-      newItems.forEach(item => {
-        if (!visited.has(item.instanceId)) {
-          const outgoing = connections.find(c => c.sourceId === item.instanceId && visited.has(c.targetId));
-          if (outgoing) {
-            const target = newItems.find(i => i.instanceId === outgoing.targetId);
-            if (target) {
-              item.x = target.x;
-              const verticalOffset = outgoing.color.includes('fuchsia') ? 64 : (32 + minGap);
-              let finalY = target.y - verticalOffset, safety = 0;
-              while (isPositionOccupied(item.x, finalY) && safety < 10) { finalY -= 32; safety++; }
-              item.y = finalY; visited.add(item.instanceId); occupied.add(`${item.x},${item.y}`);
-            }
-          }
-        }
-      });
       return newItems;
     });
   };
-
-  const isAncestor = (ancId: string, descId: string): boolean => {
-    let curr = descId; const visited = new Set<string>();
-    while (curr) {
-      if (curr === ancId) return true; if (visited.has(curr)) break; visited.add(curr);
-      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('fuchsia'));
-      if (!incoming) break; curr = incoming.sourceId;
-    }
-    return false;
-  };
-
-  const getTreeId = (id: string): string | null => {
-    let curr = id; const visited = new Set<string>(); let safety = 0;
-    while (curr && safety < 100) {
-      if (visited.has(curr)) return null; visited.add(curr);
-      const node = itemsRef.current.find(i => i.instanceId === curr); if (!node) return null;
-      if (node.isOrigin) return 'MAIN';
-      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('fuchsia'));
-      if (!incoming) return null;
-      curr = incoming.sourceId; safety++;
-    }
-    return null;
-  };
-
-  const mainNodes = useMemo(() => {
-    const main = new Set<string>(); const origin = canvasItems.find(i => i.isOrigin); if (!origin) return main;
-    const queue = [origin.instanceId]; main.add(origin.instanceId); let safety = 0;
-    while(queue.length > 0 && safety < 1000) {
-      const currId = queue.shift()!;
-      const outgoing = connections.filter(c => c.sourceId === currId && (c.sourceSide === 'bottom' || c.sourceSide === 'right') && !c.color.includes('fuchsia'));
-      outgoing.forEach(conn => { if (!main.has(conn.targetId)) { main.add(conn.targetId); queue.push(conn.targetId); } });
-      safety++;
-    }
-    return main;
-  }, [canvasItems, connections]);
 
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
     if (activeTether) return []; const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
-    const dragTreeId = getTreeId(dId);
     
     items.forEach(other => {
       if (other.instanceId === dId) return;
-      const otherTreeId = getTreeId(other.instanceId); const dx = (dragNode.x || 0) - other.x;
-      const dy = (dragNode.y || 0) - other.y; const adx = Math.abs(dx); const ady = Math.abs(dy);
-      const isSameTree = (dragTreeId !== null && otherTreeId !== null && dragTreeId === otherTreeId);
-      const isUnattachedToCanvas = (otherTreeId !== null && dragTreeId === null);
+      const dx = (dragNode.x || 0) - other.x;
+      const dy = (dragNode.y || 0) - other.y;
+      const adx = Math.abs(dx); const ady = Math.abs(dy);
       
-      if (isSameTree || isUnattachedToCanvas) {
-        const isBottomOccupied = connections.some(c => c.sourceId === other.instanceId && c.sourceSide === 'bottom');
-        const isRightOccupied = connections.some(c => c.sourceId === other.instanceId && c.sourceSide === 'right');
-        const isLeftOccupied = connections.some(c => c.sourceId === other.instanceId && c.sourceSide === 'left');
+      const isAncestorNode = isAncestor(dId, other.instanceId);
 
-        if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE && !isBottomOccupied) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any); } 
-        else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE && !isRightOccupied) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', displayColor: 'bg-emerald-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any); } 
-        else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE && !isLeftOccupied) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-fuchsia-500', displayColor: 'bg-fuchsia-500', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any); }
+      // Down (Green) -> Top (Blue)
+      if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
+      }
+      // Right (Red) -> Top (Blue)
+      else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
+      }
+      // Left (Yellow) -> Top (Blue)
+      else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+      }
+      // Top (Blue/Recursion) -> Any exit
+      else if (isAncestorNode && dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'top', targetId: dId, targetSide: 'top', color: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
       }
     });
-    if (ghosts.length === 0) return []; ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance); return [ghosts[0]];
+
+    if (ghosts.length === 0) return [];
+    ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
+    return [ghosts[0]];
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
-    const spawnX = -viewOffset.x + 32; const spawnY = -viewOffset.y + 32 + HEADER_OFFSET;
+    const spawnX = snapToGrid(-viewOffset.x + 32, 0);
+    const spawnY = snapToGrid(-viewOffset.y + 32 + HEADER_OFFSET, HEADER_OFFSET);
     setCanvasItems(prev => [...prev, { ...item, instanceId: `inst_${Date.now()}`, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem]);
     setActiveFolderView(null);
   };
@@ -320,14 +296,7 @@ export default function App() {
 
       <main className="absolute inset-0 mt-14 overflow-hidden">
         <div className="w-full h-full relative overflow-hidden bg-slate-50" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
-          <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2px, transparent 0)`, backgroundSize: `32px 32px`, backgroundPosition: `${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px` }} />
-
-          {currentPageId === 'studio' && (
-            <div className="fixed top-20 right-8 z-[100] flex flex-col gap-2">
-              <div onClick={() => gatherLayout('grid')} className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all"><LayoutGrid size={16} className="text-slate-400" /></div>
-              <div onClick={() => gatherLayout('tether')} className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all"><Waypoints size={16} className="text-slate-400" /></div>
-            </div>
-          )}
+          <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `32px 32px`, backgroundPosition: `${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px` }} />
 
           <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className="w-full h-full relative">
               {currentPageId === 'studio' ? (
@@ -339,33 +308,46 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
-                          const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : conn.color.includes('fuchsia') ? '#D946EF' : '#FBBF24';
+                          const c = conn.color.includes('emerald') ? '#10B981' : conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('amber') ? '#FBBF24' : conn.color.includes('blue') ? '#3B82F6' : '#D946EF';
                           return (
                             <React.Fragment key={conn.id}>
                               <path d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" />
                               <circle 
-                                cx={pathData.mid.x} cy={pathData.mid.y} r="10" 
+                                cx={pathData.mid.x} cy={pathData.mid.y} r="8" 
                                 fill="white" stroke={c} strokeWidth="2" 
                                 className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform" 
                                 onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }}
                               />
-                              <X x={pathData.mid.x - 4} y={pathData.mid.y - 4} size={8} stroke={c} strokeWidth={3} className="pointer-events-none" />
+                              <X x={pathData.mid.x - 3} y={pathData.mid.y - 3} size={6} stroke={c} strokeWidth={3} className="pointer-events-none" />
                             </React.Fragment>
                           );
                       })}
+                      {activeTether && (() => {
+                          const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === activeTether.targetId);
+                          if(!s || !t) return null;
+                          const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
+                          const tX = activeTether.snapX!, tY = activeTether.snapY! - HEADER_OFFSET;
+                          const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
+                          const c = activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('amber') ? '#FBBF24' : '#3B82F6';
+                          return <path d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeDasharray="6,4" className="opacity-50" />;
+                      })()}
                   </svg>
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
                       className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                       <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-blue-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
-                        <SafeIcon name={item.icon} size={16} className={item.isRegistered ? (mainNodes.has(item.instanceId) ? 'text-slate-800' : 'text-slate-400') : 'text-emerald-500'} />
+                        <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />
                         
-                        {/* Anchor Dots */}
+                        {/* 8px Anchor Dots with Dynamic Status Glow */}
                         {LATCH_POINTS.map(lp => {
-                          const hasConn = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
-                          const dotColor = hasConn ? (lp.id === 'right' ? 'bg-emerald-500' : lp.id === 'bottom' ? 'bg-rose-500' : lp.id === 'left' ? 'bg-fuchsia-500' : 'bg-blue-500') : 'bg-slate-200';
+                          const connected = connections.find(c => (c.sourceId === item.instanceId && c.sourceSide === lp.id) || (c.targetId === item.instanceId && c.targetSide === lp.id));
+                          const isOutput = lp.id !== 'top';
+                          const dotColor = connected 
+                            ? (isOutput ? lp.color : 'bg-blue-500') 
+                            : 'bg-slate-200';
+                          
                           return (
-                            <div key={lp.id} className={`absolute w-2 h-2 rounded-full border border-white shadow-sm ${dotColor}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} />
+                            <div key={lp.id} className={`absolute w-2 h-2 rounded-full border border-white shadow-sm transition-colors ${dotColor}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} />
                           );
                         })}
                       </div>
@@ -385,9 +367,12 @@ export default function App() {
         </div>
       </main>
 
-      <div className="fixed bottom-8 left-8 z-[500]">
-        <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20"><Folder size={16} className="text-white" /></div>
+      <div className="fixed bottom-8 left-8 z-[500] flex flex-col gap-2">
+         <div onClick={() => gatherLayout('grid')} className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><LayoutGrid size={16} className="text-slate-400" /></div>
+         <div onClick={() => gatherLayout('tether')} className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><Waypoints size={16} className="text-slate-400" /></div>
+         <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20 mt-2"><Folder size={16} className="text-white" /></div>
       </div>
+      
       <div className="fixed bottom-8 right-8 z-[500]">
         <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20"><SafeIcon name="Compass" size={16} className="text-white" /></div>
       </div>
