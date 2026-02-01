@@ -86,6 +86,39 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Logical reachability helpers
+  const isDescendantOf = (childId: string, potentialParentId: string, currentConns: Connection[]) => {
+    const stack = [potentialParentId];
+    const visited = new Set();
+    while (stack.length > 0) {
+        const curr = stack.pop();
+        if (!curr) continue;
+        if (curr === childId) return true;
+        if (visited.has(curr)) continue;
+        visited.add(curr);
+        currentConns.filter(c => c.sourceId === curr).forEach(c => stack.push(c.targetId));
+    }
+    return false;
+  };
+
+  const mainNodes = useMemo(() => {
+    const main = new Set();
+    const origins = canvasItems.filter(i => i.isOrigin);
+    const queue = origins.map(o => o.instanceId);
+    origins.forEach(o => main.add(o.instanceId));
+    let safety = 0;
+    while(queue.length > 0 && safety < 1000) {
+      const currentId = queue.shift();
+      // Main workflow follows Emerald (bottom) or Rose (right) paths
+      const outgoing = connections.filter(c => c.sourceId === currentId && c.sourceSide !== 'left');
+      outgoing.forEach(conn => {
+        if (!main.has(conn.targetId)) { main.add(conn.targetId); queue.push(conn.targetId); }
+      });
+      safety++;
+    }
+    return main;
+  }, [canvasItems, connections]);
+
   const poweredNodes = useMemo(() => {
     const powered = new Set();
     const origins = canvasItems.filter(i => i.isOrigin);
@@ -103,31 +136,19 @@ export default function App() {
     return powered;
   }, [canvasItems, connections]);
 
-  const isDescendantOf = (childId: string, potentialParentId: string, currentConns: Connection[]) => {
-    const stack = [potentialParentId];
-    const visited = new Set();
-    while (stack.length > 0) {
-        const curr = stack.pop();
-        if (curr === childId) return true;
-        if (visited.has(curr)) continue;
-        visited.add(curr);
-        currentConns.filter(c => c.sourceId === curr).forEach(c => stack.push(c.targetId));
-    }
-    return false;
-  };
-
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
     if (activeTether) return [];
     const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
 
+    const isDragMain = mainNodes.has(dId);
+
     items.forEach(other => {
       if (other.instanceId === dId) return;
 
       const dx = (dragNode.x || 0) - other.x;
       const dy = (dragNode.y || 0) - other.y;
-      
       const adx = Math.abs(dx);
       const ady = Math.abs(dy);
       
@@ -160,19 +181,42 @@ export default function App() {
       }
 
       if (sourceSide) {
-          const dotDist = Math.sqrt(Math.pow(snapX - dragNode.x, 2) + Math.pow(snapY - dragNode.y, 2));
-          ghosts.push({ 
-            id: 'ghost',
-            sourceId: other.instanceId, 
-            sourceSide: sourceSide, 
-            targetId: dId, 
-            targetSide: 'top', // All paths map to Top (Blue) input
-            color, 
-            displayColor: color, 
-            snapX, 
-            snapY,
-            dotDistance: dotDist 
-          } as any);
+          // ISOLATION LOGIC
+          const isOtherMain = mainNodes.has(other.instanceId);
+          let isValid = false;
+
+          if (sourceSide === 'left') {
+            // Subtree Entry: Only Main can branch to a Subtree, and it must not already be in Main
+            isValid = isOtherMain && !isDragMain;
+          } else {
+            // Standard Flow: Source and Target must be in the same logical tree type
+            // (Both Main or both Subtree)
+            const isDragInSubtree = poweredNodes.has(dId) && !isDragMain;
+            const isOtherInSubtree = poweredNodes.has(other.instanceId) && !isOtherMain;
+            
+            if (isOtherMain) {
+              isValid = !isDragInSubtree; // Main nodes can only connect to other Main or unconnected nodes
+            } else if (isOtherInSubtree) {
+              // Subtree nodes can only connect to nodes within their same branch
+              isValid = isDescendantOf(other.instanceId, dId, connections) || !poweredNodes.has(dId);
+            }
+          }
+
+          if (isValid && !isDescendantOf(other.instanceId, dId, connections)) {
+            const dotDist = Math.sqrt(Math.pow(snapX - dragNode.x, 2) + Math.pow(snapY - dragNode.y, 2));
+            ghosts.push({ 
+              id: 'ghost',
+              sourceId: other.instanceId, 
+              sourceSide: sourceSide, 
+              targetId: dId, 
+              targetSide: 'top',
+              color, 
+              displayColor: color, 
+              snapX, 
+              snapY,
+              dotDistance: dotDist 
+            } as any);
+          }
       }
     });
 
