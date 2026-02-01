@@ -118,7 +118,6 @@ export default function App() {
       if (!origin) return prev;
       const visited = new Set<string>();
       const occupied = new Set<string>();
-      const step = 32;
       const minGap = mode === 'tether' ? 32 : 0;
       
       const isPositionOccupied = (x: number, y: number) => {
@@ -137,12 +136,10 @@ export default function App() {
         const children = connections.filter(c => c.sourceId === nodeId);
         children.forEach(conn => {
           if (visited.has(conn.targetId)) return;
-          let found = false, safety = 0, searchDist = step + minGap, tx = cx, ty = cy;
+          let found = false, safety = 0, searchDist = GRID_SIZE + minGap, tx = cx, ty = cy;
           
           if (conn.color.includes('fuchsia')) {
-            // Isolated Inputs: Source sits one cell block above target
-            // But gather follows flow, so if we are processing target from root, fuchsia input is "parent"
-            // We need to special case fuchsia: we process root tree, then place floating inputs
+            // Isolated Inputs handled after tree nodes
           } else {
             while (!found && safety < 15) {
               let nextX = cx, nextY = cy;
@@ -151,7 +148,7 @@ export default function App() {
               else if (conn.sourceSide === 'left') nextX -= searchDist;
               else if (conn.sourceSide === 'top') nextY -= searchDist;
               
-              if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += 32; }
+              if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += GRID_SIZE; }
               safety++;
             }
             const target = newItems.find(i => i.instanceId === conn.targetId);
@@ -159,12 +156,11 @@ export default function App() {
           }
         });
 
-        // After tree nodes, place fuchsia inputs connected to this node's Top
         const inputs = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
         inputs.forEach(conn => {
           if (visited.has(conn.sourceId)) return;
           const tx = cx;
-          const ty = cy - (32 + minGap); // One cell block above
+          const ty = cy - (GRID_SIZE + minGap); 
           const source = newItems.find(i => i.instanceId === conn.sourceId);
           if (source) { source.x = tx; source.y = ty; visited.add(source.instanceId); occupied.add(`${tx},${ty}`); }
         });
@@ -176,7 +172,8 @@ export default function App() {
   };
 
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
-    if (activeTether) return []; const ghosts: Connection[] = [];
+    if (activeTether) return []; 
+    const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
     
@@ -185,33 +182,44 @@ export default function App() {
     items.forEach(other => {
       if (other.instanceId === dId) return;
       const otherInTree = isNodeInTree(other.instanceId);
-      const dx = (dragNode.x || 0) - other.x;
-      const dy = (dragNode.y || 0) - other.y;
-      const adx = Math.abs(dx); const ady = Math.abs(dy);
       
-      // Floating Node (Source) -> Tree Node (Target Top) = Fuchsia
+      const dx = dragNode.x - other.x;
+      const dy = dragNode.y - other.y;
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+
+      // --- CASE 1: DragNode is Target (User drags a node to attach it to the tree) ---
       if (!dragInTree && otherInTree) {
-         // Draggable node exits (bottom/right/left) into Tree node Top
-         if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-           // Floating Bottom -> Tree Top
-           ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
-         }
+          // Check standard outputs of 'other' (In Tree) -> DragNode Top
+          // Success (Bottom)
+          if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', snapX: other.x, snapY: other.y + GRID_SIZE, dotDistance: Math.sqrt(adx**2 + (dy-GRID_SIZE)**2) } as any);
+          }
+          // Error (Right)
+          else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', snapX: other.x + GRID_SIZE, snapY: other.y, dotDistance: Math.sqrt((dx-GRID_SIZE)**2 + ady**2) } as any);
+          }
+          // Parallel (Left)
+          else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', snapX: other.x - GRID_SIZE, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-GRID_SIZE)**2 + ady**2) } as any);
+          }
       }
 
-      // Standard Flow: Tree Node (Source) -> Floating Node (Target Top)
-      if (dragInTree && !otherInTree) {
-          // Bottom (Green/Success) -> Top
-          if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
-          }
-          // Right (Red/Error) -> Top
-          else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
-          }
-          // Left (Yellow/Parallel) -> Top
-          else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
-          }
+      // --- CASE 2: DragNode is Source (User drags a node ABOVE a tree node to create isolated input) ---
+      if (!dragInTree && otherInTree) {
+         // Check DragNode exits -> Other Top (Becomes Fuchsia)
+         // Only Bottom Exit for Isolated Inputs for simplicity
+         if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - GRID_SIZE, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-GRID_SIZE)**2) } as any);
+         }
+      }
+      
+      // --- CASE 3: Recursion (Tree Node to Tree Node) ---
+      if (dragInTree && otherInTree) {
+         // Logic to identify loops and show blue line
+         if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-blue-500', snapX: other.x, snapY: other.y + GRID_SIZE, dotDistance: Math.sqrt(adx**2 + (dy-GRID_SIZE)**2) } as any);
+         }
       }
     });
 
@@ -289,7 +297,13 @@ export default function App() {
                   tetherTimer.current = setTimeout(() => { if(best) { setActiveTether({ ...best }); } }, TETHER_DELAY);
               }
           } else { if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; } }
-      } 
+      } else {
+        const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
+        const best = ghosts[0] as any;
+        if (!best || best.dotDistance > SNAP_TOLERANCE) {
+          setActiveTether(null);
+        }
+      }
     };
     const handleUp = (e: MouseEvent | TouchEvent) => {
       setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
@@ -362,7 +376,7 @@ export default function App() {
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
                       className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32, transition: isDragging && draggingId === item.instanceId ? 'none' : '' }}>
-                      {item.name === 'Circuit Breaker' && <div className="absolute inset-0 translate-x-1 translate-y-1 bg-slate-200 rounded-md -z-10" />}
+                      {item.name === 'Circuit Breaker' && <div className="absolute inset-0 translate-x-1 translate-y-1 bg-slate-200 rounded-md -z-10 shadow-md" />}
                       <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-blue-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
                         <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />
                         
@@ -371,18 +385,18 @@ export default function App() {
                           let dotColor = 'bg-slate-200';
                           let glowClass = '';
                           if (connected) {
-                            if (lp.id === 'bottom') { dotColor = 'bg-emerald-500'; glowClass = 'shadow-[0_0_8px_rgba(16,185,129,0.5)]'; }
-                            else if (lp.id === 'right') { dotColor = 'bg-rose-500'; glowClass = 'shadow-[0_0_8px_rgba(244,63,94,0.5)]'; }
-                            else if (lp.id === 'left') { dotColor = 'bg-amber-400'; glowClass = 'shadow-[0_0_8px_rgba(251,191,36,0.5)]'; }
+                            if (lp.id === 'bottom') { dotColor = 'bg-emerald-500'; glowClass = 'shadow-[0_0_10px_rgba(16,185,129,0.8)]'; }
+                            else if (lp.id === 'right') { dotColor = 'bg-rose-500'; glowClass = 'shadow-[0_0_10px_rgba(244,63,94,0.8)]'; }
+                            else if (lp.id === 'left') { dotColor = 'bg-amber-400'; glowClass = 'shadow-[0_0_10px_rgba(251,191,36,0.8)]'; }
                             else { 
                               const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
                               dotColor = isFuchsia ? 'bg-fuchsia-500' : 'bg-blue-500'; 
-                              glowClass = isFuchsia ? 'shadow-[0_0_8px_rgba(217,70,239,0.5)]' : 'shadow-[0_0_8px_rgba(59,130,246,0.5)]';
+                              glowClass = isFuchsia ? 'shadow-[0_0_10px_rgba(217,70,239,0.8)]' : 'shadow-[0_0_10px_rgba(59,130,246,0.8)]';
                             }
                           }
                           
                           return (
-                            <div key={lp.id} className={`absolute w-2 h-2 rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${glowClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8, height: 8 }} />
+                            <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${glowClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8, height: 8 }} />
                           );
                         })}
                       </div>
