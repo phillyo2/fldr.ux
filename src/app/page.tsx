@@ -21,11 +21,10 @@ export default function App() {
   const [windowSize, setWindowSize] = useState({ w: 1024, h: 768 });
   const [isReady, setIsReady] = useState(false);
   
-  const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([
-    { instanceId: 'entry_origin', name: 'Entry Point', icon: 'Shield', x: 0, y: 128 + HEADER_OFFSET, isRegistered: true, isOrigin: true }
-  ]);
+  const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]); 
   const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   
   const [isDragging, setIsDragging] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null); 
@@ -80,9 +79,16 @@ export default function App() {
     const w = window.innerWidth;
     const h = window.innerHeight;
     setWindowSize({ w, h });
+    
+    // Initial sync: Entry point at 75% height, center X
     const centerX = snapToGrid(w / 2 - 16, 0);
-    setCanvasItems(prev => prev.map(item => item.isOrigin ? { ...item, x: centerX } : item));
-    setTimeout(() => setIsReady(true), 50);
+    const startY = snapToGrid(h * 0.25 + HEADER_OFFSET, HEADER_OFFSET);
+    
+    setCanvasItems([
+      { instanceId: 'entry_origin', name: 'Entry Point', icon: 'Shield', x: centerX, y: startY, isRegistered: true, isOrigin: true }
+    ]);
+    
+    setIsReady(true);
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -130,6 +136,10 @@ export default function App() {
     const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
+
+    // Fuchsia Isolation: If this node is already an isolated input provider, it is LOCKED.
+    const isDragFuchsiaProvider = connRef.current.some(c => c.sourceId === dId && c.color.includes('fuchsia'));
+    if (isDragFuchsiaProvider) return [];
     
     const dragCtx = getTreeContext(dId, connRef.current);
 
@@ -144,11 +154,15 @@ export default function App() {
     items.forEach(other => {
       if (other.instanceId === dId) return;
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
+
+      // Fuchsia Isolation Check: If other node is already an isolated input provider, ignore it.
+      const isOtherFuchsiaProvider = connRef.current.some(c => c.sourceId === other.instanceId && c.color.includes('fuchsia'));
+      if (isOtherFuchsiaProvider) return;
       
       LATCH_POINTS.forEach(lSource => {
         const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
 
-        // 1. Drag Node is Source -> Other is Target (Standard Loom Flow)
+        // 1. Drag Node is Source -> Other is Target
         const sPos = getPortPos(dragNode, lSource.id);
         const tPos = getPortPos(other, lTarget.id);
         const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
@@ -157,20 +171,20 @@ export default function App() {
           let color = lSource.color.replace('bg-', '');
           let valid = false;
 
-          // Isolated Input Logic: Floating Source -> Tree Target (Top/Blue Port)
+          // Fuchsia Rule: Floating Source -> Tree Target (Top Port)
           if (!dragCtx && otherCtx && lTarget.id === 'top') {
-            valid = true;
-            color = 'fuchsia-500';
+            // Check if dragging node is already connected to anything else.
+            const dragHasAnyConnection = connRef.current.some(c => c.sourceId === dId || c.targetId === dId);
+            if (!dragHasAnyConnection) {
+              valid = true;
+              color = 'fuchsia-500';
+            }
           }
-          // Standard Execution Tree Flow
+          // Standard Rule: Tree Node -> Floating Target
           else if (dragCtx && !otherCtx && lSource.id !== 'top') {
-             // Isolation Check: If 'other' is already a fuchsia provider, it must stay isolated
-             const isFuchsiaProvider = connRef.current.some(c => c.sourceId === other.instanceId && c.color.includes('fuchsia'));
-             if (!isFuchsiaProvider) {
-               valid = true;
-             }
+             valid = true;
           }
-          // Recursion: Descendant (Green/Red) -> Ancestor (Top/Blue)
+          // Recursion: Descendant -> Ancestor
           else if (dragCtx && otherCtx && dragCtx === otherCtx) {
             if (isAncestor(other.instanceId, dId, connRef.current)) {
               if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') {
@@ -185,7 +199,7 @@ export default function App() {
           }
         }
 
-        // 2. Other is Source -> Drag Node is Target (Dragging onto Top Input)
+        // 2. Other is Source -> Drag Node is Target
         const sPosInv = getPortPos(other, lSource.id);
         const tPosInv = getPortPos(dragNode, lTarget.id);
         const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
@@ -196,16 +210,19 @@ export default function App() {
 
           // Tree node source -> Floating target
           if (otherCtx && !dragCtx && lSource.id !== 'top') {
-            // Isolation Check: If 'drag' node is already a fuchsia provider, it must stay isolated
-            const isFuchsiaProvider = connRef.current.some(c => c.sourceId === draggingId && c.color.includes('fuchsia'));
-            if (!isFuchsiaProvider) {
+            const dragHasAnyConnection = connRef.current.some(c => c.sourceId === dId || c.targetId === dId);
+            if (!dragHasAnyConnection) {
               valid = true;
             }
           }
           // Floating Source -> Tree Target (Fuchsia)
           if (!otherCtx && dragCtx && lTarget.id === 'top') {
-            valid = true;
-            color = 'fuchsia-500';
+             // Check if 'other' is already connected to anything
+             const otherHasAnyConnection = connRef.current.some(c => c.sourceId === other.instanceId || c.targetId === other.instanceId);
+             if (!otherHasAnyConnection) {
+               valid = true;
+               color = 'fuchsia-500';
+             }
           }
 
           if (valid) {
@@ -223,6 +240,7 @@ export default function App() {
       const newItems = prev.map(item => ({ ...item }));
       const origin = newItems.find(i => i.isOrigin);
       if (!origin) return prev;
+      
       const visited = new Set<string>();
       const occupied = new Set<string>();
       const minGap = mode === 'tether' ? GRID_SIZE : 0;
@@ -242,11 +260,11 @@ export default function App() {
         const outgoing = connections.filter(c => c.sourceId === nodeId);
         const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
         
-        // Place Fuchsia Providers exactly one cell block above the target
+        // Fuchsia providers go above
         incomingFuchsia.forEach(conn => {
             if (visited.has(conn.sourceId)) return;
             const fx = cx;
-            const fy = cy - (GRID_SIZE * 2); // 32px cell + 32px gap
+            const fy = cy - (GRID_SIZE * 2);
             const source = newItems.find(i => i.instanceId === conn.sourceId);
             if (source) {
                 source.x = fx; source.y = fy;
@@ -256,7 +274,7 @@ export default function App() {
 
         outgoing.forEach(conn => {
           if (visited.has(conn.targetId)) return;
-          if (conn.color.includes('fuchsia')) return; // Fuchsia is handled by target
+          if (conn.color.includes('fuchsia')) return;
 
           let found = false, safety = 0, searchDist = GRID_SIZE + minGap, tx = cx, ty = cy;
           
@@ -281,13 +299,19 @@ export default function App() {
       };
       
       processNode(origin.instanceId, origin.x, origin.y);
+
+      // Jump to workflow center
+      const centerX = origin.x - (windowSize.w / 2) + 16;
+      const centerY = origin.y - (windowSize.h / 2) + 16;
+      setViewOffset({ x: -centerX, y: -centerY });
+
       return newItems;
     });
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
-    const spawnX = snapToGrid(-viewOffset.x + 32, 0);
-    const spawnY = snapToGrid(-viewOffset.y + 32 + HEADER_OFFSET, HEADER_OFFSET);
+    const spawnX = snapToGrid(-viewOffset.x + windowSize.w / 2 - 16, 0);
+    const spawnY = snapToGrid(-viewOffset.y + windowSize.h / 2 - 16, HEADER_OFFSET);
     setCanvasItems(prev => [...prev, { ...item, instanceId: `inst_${Date.now()}`, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem]);
     setActiveFolderView(null);
   };
@@ -305,7 +329,7 @@ export default function App() {
     const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     setDragStartPos({ id: item.instanceId, x: clientX, y: clientY });
-    mouseOffset.current = { x: clientX - item.x, y: clientY - item.y };
+    mouseOffset.current = { x: (clientX - viewOffset.x) / zoom - item.x, y: (clientY - viewOffset.y) / zoom - item.y };
     pressTimer.current = setTimeout(() => { setIsDragging(true); setDraggingId(item.instanceId); }, LONG_PRESS_MS);
   };
 
@@ -345,13 +369,12 @@ export default function App() {
       if (isPanning) {
         const dx = clientX - panStart.current.x;
         const dy = clientY - panStart.current.y;
-        const finalX = currentPageId === 'home' ? viewOffset.x : panOffsetStart.current.x + dx;
-        setViewOffset({ x: finalX, y: panOffsetStart.current.y + dy });
+        setViewOffset({ x: panOffsetStart.current.x + dx, y: panOffsetStart.current.y + dy });
         return;
       }
 
-      const x = clientX - mouseOffset.current.x; 
-      const y = clientY - mouseOffset.current.y;
+      const x = (clientX - viewOffset.x) / zoom - mouseOffset.current.x; 
+      const y = (clientY - viewOffset.y) / zoom - mouseOffset.current.y;
       setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x, y } : i));
       
       const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
@@ -360,7 +383,7 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
-        // Sticky logic: don't break until significantly further away (Unbreakable Persistence)
+        // Unbreakable Handshake: Remains locked until significantly far or targeting elsewhere
         const currentActiveGhost = ghosts.find((g: any) => 
           g.sourceId === activeTether.sourceId && 
           g.targetId === activeTether.targetId &&
@@ -423,15 +446,15 @@ export default function App() {
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
-  }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, currentPageId]); 
+  }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, currentPageId, zoom, windowSize]); 
 
   return (
     <div className="relative w-full h-screen bg-white overflow-hidden select-none font-sans">
       <main className="absolute inset-0 overflow-hidden">
         <div className="w-full h-full relative overflow-hidden bg-white" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
-          <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `32px 32px`, backgroundPosition: `${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px` }} />
+          <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `${32 * zoom}px ${32 * zoom}px`, backgroundPosition: `${(viewOffset.x + 16 * zoom) % (32 * zoom)}px ${(viewOffset.y + 16 * zoom) % (32 * zoom)}px` }} />
 
-          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className={`w-full h-full relative ${(isDragging || isPanning) ? '' : 'transition-transform duration-300'}`}>
+          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0' }} className={`w-full h-full relative`}>
               {currentPageId === 'studio' ? (
                 <>
                   <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-visible">
@@ -442,23 +465,21 @@ export default function App() {
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                           
-                          let strokeColor = '#3B82F6'; // Default Blue
+                          let strokeColor = '#3B82F6'; 
                           if (conn.color.includes('emerald')) strokeColor = '#10B981';
                           else if (conn.color.includes('rose')) strokeColor = '#F43F5E';
                           else if (conn.color.includes('amber')) strokeColor = '#FBBF24';
                           else if (conn.color.includes('fuchsia')) strokeColor = '#D946EF';
-                          else if (conn.color.includes('blue')) strokeColor = '#3B82F6';
 
                           return (
                             <React.Fragment key={conn.id}>
-                              <path d={pathData.d} stroke={strokeColor} strokeWidth="3" fill="none" strokeLinecap="round" />
+                              <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeLinecap="round" />
                               <circle 
-                                cx={pathData.mid.x} cy={pathData.mid.y} r="8" 
-                                fill="white" stroke={strokeColor} strokeWidth="2" 
+                                cx={pathData.mid.x} cy={pathData.mid.y} r={8 / zoom} 
+                                fill="white" stroke={strokeColor} strokeWidth={2 / zoom} 
                                 className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform shadow-sm" 
                                 onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }}
                               />
-                              <X x={pathData.mid.x - 3} y={pathData.mid.y - 3} size={6} stroke={strokeColor} strokeWidth={3} className="pointer-events-none" />
                             </React.Fragment>
                           );
                       })}
@@ -475,19 +496,14 @@ export default function App() {
                           else if (activeTether.color.includes('amber')) strokeColor = '#FBBF24';
                           else if (activeTether.color.includes('fuchsia')) strokeColor = '#D946EF';
 
-                          return <path d={pathData.d} stroke={strokeColor} strokeWidth="3" fill="none" strokeDasharray="6,4" className="opacity-50" />;
+                          return <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeDasharray={`${6/zoom},${4/zoom}`} className="opacity-50" />;
                       })()}
                   </svg>
-                  {canvasItems.map(item => {
-                    const draggingNode = draggingId ? canvasItems.find(i => i.instanceId === draggingId) : null;
-                    const isNearby = draggingNode ? Math.sqrt(Math.pow(item.x - draggingNode.x, 2) + Math.pow(item.y - draggingNode.y, 2)) < DETECTION_RANGE : false;
-
-                    return (
+                  {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
-                      className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32, transition: isDragging && draggingId === item.instanceId ? 'none' : '' }}>
-                      {item.name === 'Circuit Breaker' && <div className="absolute inset-0 translate-x-1 translate-y-1 bg-slate-200 rounded-md -z-10 shadow-md" />}
-                      <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-blue-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
-                        <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />
+                      className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                      <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
+                        <SafeIcon name={item.icon} size={16} className={item.isOrigin ? 'text-white' : (item.isRegistered ? 'text-slate-800' : 'text-emerald-500')} />
                         
                         {LATCH_POINTS.map(lp => {
                           const connectedAsSource = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
@@ -495,41 +511,32 @@ export default function App() {
                           const tethered = activeTether && ((activeTether.sourceId === item.instanceId && activeTether.sourceSide === lp.id) || (activeTether.targetId === item.instanceId && activeTether.targetSide === lp.id));
                           
                           let dotColor = 'bg-slate-200';
-                          let glowClass = '';
                           let opacityClass = 'opacity-0 scale-50';
 
                           if (connectedAsSource || connectedAsTarget || tethered) {
                             opacityClass = 'opacity-100 scale-100';
-                            if (lp.id === 'bottom') { dotColor = 'bg-emerald-500'; glowClass = 'shadow-[0_0_10px_rgba(16,185,129,0.8)]'; }
-                            else if (lp.id === 'right') { dotColor = 'bg-rose-500'; glowClass = 'shadow-[0_0_10px_rgba(244,63,94,0.8)]'; }
-                            else if (lp.id === 'left') { dotColor = 'bg-amber-400'; glowClass = 'shadow-[0_0_10px_rgba(251,191,36,0.8)]'; }
+                            if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
+                            else if (lp.id === 'right') dotColor = 'bg-rose-500';
+                            else if (lp.id === 'left') dotColor = 'bg-amber-400';
                             else { 
                               const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
                               dotColor = isFuchsia ? 'bg-fuchsia-500' : 'bg-blue-500'; 
-                              glowClass = isFuchsia ? 'shadow-[0_0_10px_rgba(217,70,239,0.8)]' : 'shadow-[0_0_10px_rgba(59,130,246,0.8)]';
                             }
-                            if (tethered) {
-                              opacityClass = 'opacity-100 scale-125';
-                              glowClass += ' animate-pulse';
-                            }
-                          } else if (isNearby || (isDragging && draggingId === item.instanceId)) {
-                            opacityClass = 'opacity-40 scale-100';
                           }
                           
                           return (
-                            <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${glowClass} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8, height: 8 }} />
+                            <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />
                           );
                         })}
                       </div>
                     </div>
-                  );
-                  })}
+                  ))}
                 </>
               ) : (
                 <div className="p-12 max-w-5xl">
                    <h1 className="text-4xl font-black italic uppercase text-slate-800 mb-8">Dashboard</h1>
                    <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm w-64 h-32 flex flex-col justify-center">
-                       <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Total Active Nodes</p>
+                       <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Total Nodes</p>
                        <p className="text-4xl font-black text-slate-800">{canvasItems.length}</p>
                    </div>
                 </div>
@@ -537,6 +544,10 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      <div className="fixed top-8 right-8 z-[1000] flex items-center gap-4 bg-white/50 backdrop-blur-sm p-2 rounded-xl border border-white/20">
+         <input type="range" min="0.5" max="2" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-24 h-1 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+      </div>
 
       <div className="fixed bottom-8 left-8 z-[500] flex flex-col gap-2">
          <div onClick={() => gatherLayout('grid')} className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><LayoutGrid size={16} className="text-slate-400" /></div>
@@ -556,12 +567,7 @@ export default function App() {
           <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-slate-100 space-y-6">
             <h2 className="text-3xl font-black italic uppercase text-slate-800 text-center">Action Init</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <input value={studioName} onChange={e => setStudioName(e.target.value)} placeholder="Identity..." className="w-full bg-slate-50 p-4 rounded-xl font-bold border outline-none" />
-                <div className="grid grid-cols-4 gap-2">
-                    {SELECTABLE_ICONS.map(ic => (<button key={ic} onClick={() => setStudioIcon(ic)} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${studioIcon === ic ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-400'}`}><SafeIcon name={ic} size={16} /></button>))}
-                </div>
-              </div>
+              <input value={studioName} onChange={e => setStudioName(e.target.value)} placeholder="Identity..." className="w-full bg-slate-50 p-4 rounded-xl font-bold border outline-none" />
               <textarea value={studioPayload} onChange={e => setStudioPayload(e.target.value)} className="w-full h-28 bg-slate-900 text-emerald-400 p-4 rounded-xl font-mono text-[10px] resize-none border border-white/10 outline-none" placeholder="Payload Schema" />
             </div>
             <div className="flex gap-4">
