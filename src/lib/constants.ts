@@ -10,7 +10,7 @@ export const HEADER_OFFSET = 56;
 export const ICON_SIZE = 24; 
 export const LONG_PRESS_MS = 150; 
 export const DRAG_THRESHOLD = 5; 
-export const DRAG_VISUAL_OFFSET = 40; // Pixels to shift tile up when dragging
+export const DRAG_VISUAL_OFFSET = 0; // Set to 0 to keep tile exactly on finger/cursor
 
 export const SELECTABLE_ICONS = [
   'Terminal', 'Globe', 'Database', 'Bell', 'Send', 'Activity', 

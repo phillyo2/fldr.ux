@@ -81,6 +81,14 @@ export default function App() {
 
   useEffect(() => {
     setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+    
+    // Center the origin node on mount
+    const centerX = snapToGrid(window.innerWidth / 2 - 16, 0);
+    setCanvasItems(prev => prev.map(item => 
+      item.isOrigin ? { ...item, x: centerX } : item
+    ));
+    lastValidPos.current = { x: centerX, y: 128 + HEADER_OFFSET };
+
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -523,7 +531,7 @@ export default function App() {
 
                 {canvasItems.map(item => (
                   <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
-                    className={`absolute cursor-pointer group transition-all duration-300 ${isDragging && draggingId === item.instanceId ? 'scale-110 z-[1000]' : 'z-10'} flex items-center justify-center`} 
+                    className={`absolute cursor-pointer group ${isDragging && draggingId === item.instanceId ? 'scale-110 z-[1000]' : 'transition-all duration-300 z-10'} flex items-center justify-center`} 
                     style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                     <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border transition-all 
                       ${item.isOrigin ? 'border-blue-400 ring-1 ring-blue-50 shadow-blue-100' : (item.isRegistered ? 'border-slate-200 shadow-slate-100' : 'border-emerald-300 ring-1 ring-emerald-50 shadow-emerald-50')}
