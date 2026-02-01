@@ -110,7 +110,7 @@ export default function App() {
       const occupied = new Set<string>();
       
       const GRID_STEP = 32;
-      const TETHER_STEP = 128; // Distance used to break into a new group
+      const TETHER_STEP = 128; 
       const step = mode === 'grid' ? GRID_STEP : 96;
 
       // Start origin
@@ -131,7 +131,7 @@ export default function App() {
           else if (conn.sourceSide === 'left') tx -= step;
           else if (conn.sourceSide === 'top') ty -= step;
 
-          // Resolve collisions: If spot is taken in Grid mode, push to tether distance
+          // Resolve collisions
           if (mode === 'grid' && occupied.has(`${tx},${ty}`)) {
             let searchDist = TETHER_STEP;
             let found = false;
@@ -166,7 +166,7 @@ export default function App() {
 
       processNode(origin.instanceId, origin.x, origin.y);
       
-      // Secondary pass for unattached nodes
+      // Secondary pass for unattached nodes (like isolated inputs)
       newItems.forEach(item => {
         if (!visited.has(item.instanceId)) {
           const outgoing = connections.find(c => c.sourceId === item.instanceId && visited.has(c.targetId));
@@ -174,7 +174,12 @@ export default function App() {
             const target = newItems.find(i => i.instanceId === outgoing.targetId);
             if (target) {
               item.x = target.x;
-              item.y = target.y - 32;
+              
+              // Isolated inputs (fuchsia) should sit one block above the target in tether view (one cell box gap)
+              const isIsolatedInput = outgoing.color.includes('fuchsia');
+              const offset = (mode === 'tether' && isIsolatedInput) ? 64 : 32;
+              item.y = target.y - offset;
+              
               visited.add(item.instanceId);
               occupied.add(`${item.x},${item.y}`);
             }
