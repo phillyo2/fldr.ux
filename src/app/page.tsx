@@ -260,7 +260,10 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
-                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+                // Success paths (bottom) should always use at least 2 blocks to maintain definition
+                let step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+                if (conn.sourceSide === 'bottom') step = Math.max(step, GRID_SIZE * 2);
+
                 if (conn.sourceSide === 'bottom') ty += step;
                 else if (conn.sourceSide === 'right') tx += step;
                 else if (conn.sourceSide === 'left') tx -= step;
@@ -430,10 +433,11 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           
-                          // Spacing refinement: Hide standard adjacent lines to prevent clutter
+                          // Spacing refinement: Hide standard adjacent lines to prevent clutter, but ALWAYS show emerald (success) and fuchsia (recursion)
                           const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
                           const isFuchsia = conn.color.includes('fuchsia');
-                          if (!isFuchsia && dist < 48) return null;
+                          const isEmerald = conn.color.includes('emerald');
+                          if (!isFuchsia && !isEmerald && dist < 48) return null;
 
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                           let strokeColor = '#3B82F6'; 
