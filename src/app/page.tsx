@@ -87,6 +87,33 @@ export default function App() {
   }, []);
 
   // Logical reachability and Tree Isolation helpers
+  const getTreeId = (id: string): string | null => {
+    let curr = id;
+    const visited = new Set<string>();
+    let safety = 0;
+    while (curr && safety < 100) {
+      if (visited.has(curr)) return null;
+      visited.add(curr);
+      
+      const node = itemsRef.current.find(i => i.instanceId === curr);
+      if (!node) return null;
+      if (node.isOrigin) return 'MAIN';
+
+      const incoming = connRef.current.find(c => c.targetId === curr);
+      if (!incoming) return null; // Unattached node
+
+      if (incoming.sourceSide === 'left') {
+        // This node is the root of its own isolated subtree
+        return curr;
+      }
+
+      // Trace back through standard flow (bottom or right)
+      curr = incoming.sourceId;
+      safety++;
+    }
+    return null;
+  };
+
   const mainNodes = useMemo(() => {
     const main = new Set<string>();
     const origin = canvasItems.find(i => i.isOrigin);
@@ -111,41 +138,13 @@ export default function App() {
     return main;
   }, [canvasItems, connections]);
 
-  const getTreeRoot = (id: string): string | null => {
-    if (mainNodes.has(id)) return 'MAIN';
-    
-    // Check if this node is part of a subtree
-    // Trace back to the node that has an incoming 'left' (Amber) connection
-    const visited = new Set<string>();
-    let currentId = id;
-    
-    let safety = 0;
-    while (safety < 100) {
-        if (visited.has(currentId)) return null; // Cycle
-        visited.add(currentId);
-        
-        const incoming = connections.find(c => c.targetId === currentId);
-        if (!incoming) return null; // Unattached
-        
-        if (incoming.sourceSide === 'left') {
-            // This is the head of a subtree
-            return currentId; 
-        }
-        
-        currentId = incoming.sourceId;
-        if (mainNodes.has(currentId)) return 'MAIN';
-        safety++;
-    }
-    return null;
-  };
-
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
     if (activeTether) return [];
     const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
 
-    const dragTreeRoot = getTreeRoot(dId);
+    const dragTreeId = getTreeId(dId);
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
@@ -161,18 +160,21 @@ export default function App() {
       let snapY = other.y;
 
       // DIRECTIONAL HANDSHAKE PROTOCOL
+      // Success (Emerald): Below target
       if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
         sourceSide = 'bottom';
         color = 'bg-emerald-500';
         snapX = other.x;
         snapY = other.y + 32;
       } 
+      // Error (Rose): Right of target
       else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
         sourceSide = 'right';
         color = 'bg-rose-500';
         snapX = other.x + 32;
         snapY = other.y;
       } 
+      // Subtree (Amber): Left of target
       else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
         sourceSide = 'left';
         color = 'bg-amber-400';
@@ -181,19 +183,20 @@ export default function App() {
       }
 
       if (sourceSide) {
-          const otherTreeRoot = getTreeRoot(other.instanceId);
+          const otherTreeId = getTreeId(other.instanceId);
           let isValid = false;
 
           if (sourceSide === 'left') {
-            // SUBTREE ISOLATION: Only MAIN nodes can start a subtree. 
-            // The dragged node must be unattached.
-            isValid = (otherTreeRoot === 'MAIN') && (dragTreeRoot === null);
+            // NESTED SUBTREE ISOLATION:
+            // Any node in any existing tree can start a NEW nested subtree.
+            // The dragged node must be unattached to start a new branch.
+            isValid = (otherTreeId !== null) && (dragTreeId === null);
           } else {
             // STANDARD FLOW ISOLATION: 
-            // 1. Both nodes are in the same tree (MAIN or the same SUBTREE).
+            // 1. Both nodes are in the same immediate isolated tree.
             // 2. Target is in a tree, but dragging node is unattached.
-            isValid = (otherTreeRoot === dragTreeRoot && otherTreeRoot !== null) || 
-                      (otherTreeRoot !== null && dragTreeRoot === null);
+            isValid = (otherTreeId !== null && dragTreeId === null) || 
+                      (otherTreeId !== null && otherTreeId === dragTreeId);
           }
 
           if (isValid) {
@@ -462,18 +465,17 @@ export default function App() {
                     )
                 })}
 
-                {/* --- LATCH POINTS RENDERING (TWO PASSES FOR PARENT-ON-TOP) --- */}
+                {/* --- TWO-PASS LATCH POINTS RENDERING --- */}
                 
                 {/* PASS 1: Child Ports (Inputs - Blue) */}
-                {canvasItems.map(item => {
-                  return (
+                {canvasItems.map(item => (
                     <div key={`latch_inputs_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1001]' : 'z-20'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type === 'input').map(lp => {
                           const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                          const isGuidance = !!ghost;
                           const isConnected = !!outgoingLink || !!incomingLink;
+                          const isGuidance = !!ghost || !!activeTether?.targetId === item.instanceId;
                           const isVisible = isGuidance || isConnected;
                           const c = lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300';
 
@@ -487,19 +489,17 @@ export default function App() {
                           );
                         })}
                     </div>
-                  );
-                })}
+                ))}
 
                 {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow) */}
-                {canvasItems.map(item => {
-                  return (
+                {canvasItems.map(item => (
                     <div key={`latch_parents_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1002]' : 'z-21'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type !== 'input').map(lp => {
                           const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                          const isGuidance = !!ghost;
                           const isConnected = !!outgoingLink || !!incomingLink;
+                          const isGuidance = !!ghost || !!activeTether?.sourceId === item.instanceId;
                           const isVisible = isGuidance || isConnected;
                           
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : 'bg-amber-400';
@@ -514,8 +514,7 @@ export default function App() {
                           );
                         })}
                     </div>
-                  );
-                })}
+                ))}
             </div>
           </div>
         ) : (
