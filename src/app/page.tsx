@@ -26,6 +26,7 @@ export default function App() {
   const [connections, setConnections] = useState<Connection[]>([]); 
   const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   
   const [isDragging, setIsDragging] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null); 
@@ -136,7 +137,6 @@ export default function App() {
     const dragCtx = getTreeContext(dId, connRef.current);
     const fuchsiaProviders = new Set(connRef.current.filter(c => c.color.includes('fuchsia')).map(c => c.sourceId));
 
-    // Locked tile: cannot latch to others if already serving as a data provider
     if (fuchsiaProviders.has(dId)) return ghosts;
 
     const getPortPos = (item: any, side: string) => {
@@ -149,10 +149,7 @@ export default function App() {
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
-      
-      // Locked tile: cannot have tiles latched to it if already serving as a data provider
       if (fuchsiaProviders.has(other.instanceId)) return;
-
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
 
       LATCH_POINTS.forEach(lSource => {
@@ -218,7 +215,6 @@ export default function App() {
         };
 
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
-        // Unified root logic: if it has an incoming connection, it's not a root, even origin.
         const roots = newItems.filter(i => !incomingTargetIds.has(i.instanceId));
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
@@ -240,7 +236,6 @@ export default function App() {
                 else if (conn.sourceSide === 'left') tx -= step;
                 else if (conn.sourceSide === 'top') ty -= step;
 
-                // Recursive/Ancestor avoidance logic
                 if (isAncestor(conn.targetId, nodeId, connections)) ty += step * 2;
 
                 const { tx: finalX, ty: finalY } = findSafePosition(
@@ -282,39 +277,36 @@ export default function App() {
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
     // Proximity Spawning Logic:
-    // 1. Identify Leaf Nodes (no outgoing connections)
-    const outgoingSourceIds = new Set(connections.map(c => c.sourceId));
-    const leafNodes = canvasItems.filter(i => !outgoingSourceIds.has(i.instanceId));
-
-    // 2. Calculate current screen center in canvas space
+    // 1. Identify current screen center in canvas space
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
 
-    let spawnX, spawnY;
+    let bestAnchorPos = { x: screenCenterX, y: screenCenterY };
+    let minDist = Infinity;
 
-    if (leafNodes.length > 0) {
-      // 3. Find the leaf node closest to the screen center
-      let closestLeaf = leafNodes[0];
-      let minDist = Infinity;
+    // 2. Find nearest output anchor (Red or Green) to screen center
+    canvasItems.forEach(node => {
+      // Bottom Anchor (Green)
+      const bX = node.x + 16;
+      const bY = node.y + 32;
+      const dBottom = Math.sqrt(Math.pow(bX - screenCenterX, 2) + Math.pow(bY - screenCenterY, 2));
+      if (dBottom < minDist) {
+        minDist = dBottom;
+        bestAnchorPos = { x: bX, y: bY };
+      }
+      // Right Anchor (Red)
+      const rX = node.x + 32;
+      const rY = node.y + 16;
+      const dRight = Math.sqrt(Math.pow(rX - screenCenterX, 2) + Math.pow(rY - screenCenterY, 2));
+      if (dRight < minDist) {
+        minDist = dRight;
+        bestAnchorPos = { x: rX, y: rY };
+      }
+    });
 
-      leafNodes.forEach(node => {
-        const dx = node.x - screenCenterX;
-        const dy = node.y - screenCenterY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < minDist) {
-          minDist = dist;
-          closestLeaf = node;
-        }
-      });
-
-      // 4. Position new tile two grid units below the nearest leaf
-      spawnX = snapToGrid(closestLeaf.x, 0);
-      spawnY = snapToGrid(closestLeaf.y + GRID_SIZE * 2, HEADER_OFFSET);
-    } else {
-      // Fallback if no leaf nodes found
-      spawnX = snapToGrid(screenCenterX - 16, 0);
-      spawnY = snapToGrid(screenCenterY - 16, HEADER_OFFSET);
-    }
+    // 3. Position new tile relative to nearest anchor
+    let spawnX = snapToGrid(bestAnchorPos.x - 16, 0);
+    let spawnY = snapToGrid(bestAnchorPos.y + GRID_SIZE, HEADER_OFFSET);
 
     // Basic collision avoidance
     const occupied = new Set(canvasItems.map(i => `${Math.round(i.x)},${Math.round(i.y)}`));
@@ -326,14 +318,31 @@ export default function App() {
 
     const newInstanceId = `inst_${Date.now()}`;
     const newItem = { ...item, instanceId: newInstanceId, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem;
-    
     setCanvasItems(prev => [...prev, newItem]);
 
-    // 5. Pan the view to center the new node
-    setViewOffset({
-      x: windowSize.w / 2 - (spawnX + 16) * zoom,
-      y: windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom
-    });
+    // 4. Soft Panning Logic: Pan slightly if the new node is too far over
+    const margin = 120; // Proximity margin to screen edges
+    const screenSpawnX = spawnX * zoom + viewOffset.x;
+    const screenSpawnY = (spawnY - HEADER_OFFSET) * zoom + viewOffset.y;
+
+    const isOffScreen = 
+      screenSpawnX < margin || 
+      screenSpawnX > windowSize.w - margin ||
+      screenSpawnY < margin ||
+      screenSpawnY > windowSize.h - margin;
+
+    if (isOffScreen) {
+      const targetVX = windowSize.w / 2 - (spawnX + 16) * zoom;
+      const targetVY = windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom;
+      
+      // Perform a non-instant, soft pan towards the new node
+      setIsTransitioning(true);
+      setViewOffset(prev => ({
+        x: prev.x + (targetVX - prev.x) * 0.7,
+        y: prev.y + (targetVY - prev.y) * 0.7
+      }));
+      setTimeout(() => setIsTransitioning(false), 500);
+    }
 
     setActiveFolderView(null);
   };
@@ -449,7 +458,7 @@ export default function App() {
         <div className="w-full h-full relative overflow-hidden bg-white" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
           <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `${32 * zoom}px ${32 * zoom}px`, backgroundPosition: `${(viewOffset.x + 16 * zoom) % (32 * zoom)}px ${(viewOffset.y + 16 * zoom) % (32 * zoom)}px` }} />
 
-          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0' }} className={`w-full h-full relative`}>
+          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0' }} className={`w-full h-full relative ${isTransitioning ? 'transition-transform duration-500 ease-in-out' : ''}`}>
               {currentPageId === 'studio' ? (
                 <>
                   <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-visible">
