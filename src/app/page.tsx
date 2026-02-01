@@ -86,7 +86,21 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Logical reachability and Tree Isolation helpers
+  const isAncestor = (ancId: string, descId: string): boolean => {
+    let curr = descId;
+    const visited = new Set<string>();
+    while (curr) {
+      if (curr === ancId) return true;
+      if (visited.has(curr)) break;
+      visited.add(curr);
+      // Standard flow connections only (ignore blue go-tos)
+      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('blue'));
+      if (!incoming) break;
+      curr = incoming.sourceId;
+    }
+    return false;
+  };
+
   const getTreeId = (id: string): string | null => {
     let curr = id;
     const visited = new Set<string>();
@@ -99,15 +113,11 @@ export default function App() {
       if (!node) return null;
       if (node.isOrigin) return 'MAIN';
 
-      const incoming = connRef.current.find(c => c.targetId === curr);
-      if (!incoming) return null; // Unattached node
+      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('blue'));
+      if (!incoming) return null;
 
-      if (incoming.sourceSide === 'left') {
-        // This node is the root of its own isolated subtree
-        return curr;
-      }
+      if (incoming.sourceSide === 'left') return curr;
 
-      // Trace back through standard flow (bottom or right)
       curr = incoming.sourceId;
       safety++;
     }
@@ -125,8 +135,10 @@ export default function App() {
     let safety = 0;
     while(queue.length > 0 && safety < 1000) {
       const currId = queue.shift()!;
-      // Main workflow only follows Success (bottom) or Error (right) paths
-      const outgoing = connections.filter(c => c.sourceId === currId && (c.sourceSide === 'bottom' || c.sourceSide === 'right'));
+      const outgoing = connections.filter(c => c.sourceId === currId && 
+        (c.sourceSide === 'bottom' || c.sourceSide === 'right') &&
+        !c.color.includes('blue')
+      );
       outgoing.forEach(conn => {
         if (!main.has(conn.targetId)) {
           main.add(conn.targetId);
@@ -148,71 +160,43 @@ export default function App() {
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
+      const otherTreeId = getTreeId(other.instanceId);
 
       const dx = (dragNode.x || 0) - other.x;
       const dy = (dragNode.y || 0) - other.y;
       const adx = Math.abs(dx);
       const ady = Math.abs(dy);
       
-      let sourceSide = null;
-      let color = '';
-      let snapX = other.x;
-      let snapY = other.y;
+      // Case 1: Standard Isolation Logic
+      const isSameTree = (dragTreeId !== null && otherTreeId !== null && dragTreeId === otherTreeId);
+      const isUnattachedToCanvas = (otherTreeId !== null && dragTreeId === null);
 
-      // DIRECTIONAL HANDSHAKE PROTOCOL
-      // Success (Emerald): Below target
-      if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-        sourceSide = 'bottom';
-        color = 'bg-emerald-500';
-        snapX = other.x;
-        snapY = other.y + 32;
-      } 
-      // Error (Rose): Right of target
-      else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-        sourceSide = 'right';
-        color = 'bg-rose-500';
-        snapX = other.x + 32;
-        snapY = other.y;
-      } 
-      // Subtree (Amber): Left of target
-      else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-        sourceSide = 'left';
-        color = 'bg-amber-400';
-        snapX = other.x - 32;
-        snapY = other.y;
+      if (isSameTree || isUnattachedToCanvas) {
+          // Success (Emerald): Below target
+          if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', displayColor: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
+          } 
+          // Error (Rose): Right of target
+          else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
+          } 
+          // Subtree (Amber): Left of target (Always creates NEW isolation)
+          else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+            if (dragTreeId === null) {
+              ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+            }
+          }
       }
 
-      if (sourceSide) {
-          const otherTreeId = getTreeId(other.instanceId);
-          let isValid = false;
-
-          if (sourceSide === 'left') {
-            // NESTED SUBTREE ISOLATION:
-            // Any node in any existing tree can start a NEW nested subtree.
-            // The dragged node must be unattached to start a new branch.
-            isValid = (otherTreeId !== null) && (dragTreeId === null);
-          } else {
-            // STANDARD FLOW ISOLATION: 
-            // 1. Both nodes are in the same immediate isolated tree.
-            // 2. Target is in a tree, but dragging node is unattached.
-            isValid = (otherTreeId !== null && dragTreeId === null) || 
-                      (otherTreeId !== null && otherTreeId === dragTreeId);
+      // Case 2: Recursion / Go-To (Dragged Node -> Canvas Ancestor)
+      if (isSameTree && isAncestor(other.instanceId, dId)) {
+          // Go-To Success: Drag above target
+          if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+             ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
           }
-
-          if (isValid) {
-            const dotDist = Math.sqrt(Math.pow(snapX - dragNode.x, 2) + Math.pow(snapY - dragNode.y, 2));
-            ghosts.push({ 
-              id: 'ghost',
-              sourceId: other.instanceId, 
-              sourceSide: sourceSide, 
-              targetId: dId, 
-              targetSide: 'top',
-              color, 
-              displayColor: color, 
-              snapX, 
-              snapY,
-              dotDistance: dotDist 
-            } as any);
+          // Go-To Error: Drag left of target
+          else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+             ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'right', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
           }
       }
     });
@@ -412,7 +396,7 @@ export default function App() {
                     })}
                     
                     {activeTether && (() => {
-                        const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === draggingId);
+                        const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === activeTether.targetId);
                         if (!s || !t) return null;
                         
                         const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
@@ -465,17 +449,15 @@ export default function App() {
                     )
                 })}
 
-                {/* --- TWO-PASS LATCH POINTS RENDERING --- */}
-                
                 {/* PASS 1: Child Ports (Inputs - Blue) */}
                 {canvasItems.map(item => (
                     <div key={`latch_inputs_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1001]' : 'z-20'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type === 'input').map(lp => {
-                          const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
+                          const ghost = ghostConnections.find(g => g.targetId === item.instanceId && g.targetSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           const isConnected = !!outgoingLink || !!incomingLink;
-                          const isGuidance = !!ghost || !!activeTether?.targetId === item.instanceId;
+                          const isGuidance = !!ghost || activeTether?.targetId === item.instanceId;
                           const isVisible = isGuidance || isConnected;
                           const c = lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300';
 
@@ -499,7 +481,7 @@ export default function App() {
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           const isConnected = !!outgoingLink || !!incomingLink;
-                          const isGuidance = !!ghost || !!activeTether?.sourceId === item.instanceId;
+                          const isGuidance = !!ghost || activeTether?.sourceId === item.instanceId;
                           const isVisible = isGuidance || isConnected;
                           
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : 'bg-amber-400';
@@ -557,3 +539,4 @@ export default function App() {
     </div>
   );
 }
+
