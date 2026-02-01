@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -217,11 +216,24 @@ export default function App() {
         const occupied = new Set<string>();
 
         const isPositionOccupied = (x: number, y: number) => {
-            for (const pos of occupied) {
-                const [ox, oy] = pos.split(',').map(Number);
-                if (Math.abs(ox - x) < 1 && Math.abs(oy - y) < 1) return true;
+            // Fuzzy match for snap positions to avoid overlaps
+            const key = `${Math.round(x)},${Math.round(y)}`;
+            return occupied.has(key);
+        };
+
+        const markOccupied = (x: number, y: number) => {
+            occupied.add(`${Math.round(x)},${Math.round(y)}`);
+        };
+
+        const findSafePosition = (startX: number, startY: number, stepX: number, stepY: number) => {
+            let tx = startX, ty = startY;
+            let safety = 0;
+            while (isPositionOccupied(tx, ty) && safety < 50) {
+                tx += stepX;
+                ty += stepY;
+                safety++;
             }
-            return false;
+            return { tx, ty };
         };
 
         const modifiers = newItems.filter(i => !i.isOrigin && !connections.some(c => c.sourceId === i.instanceId || c.targetId === i.instanceId));
@@ -229,52 +241,57 @@ export default function App() {
         modifiers.forEach((mod, idx) => {
             const col = idx % modCols;
             const row = Math.floor(idx / modCols);
-            mod.x = snapToGrid(windowSize.w / 2 - (modCols * GRID_SIZE) / 2 + col * GRID_SIZE, 0);
-            mod.y = snapToGrid(HEADER_OFFSET + row * GRID_SIZE, HEADER_OFFSET);
+            const startX = snapToGrid(windowSize.w / 2 - (modCols * GRID_SIZE) / 2 + col * GRID_SIZE, 0);
+            const startY = snapToGrid(HEADER_OFFSET + row * GRID_SIZE, HEADER_OFFSET);
+            const { tx, ty } = findSafePosition(startX, startY, GRID_SIZE, 0);
+            mod.x = tx; mod.y = ty;
             visited.add(mod.instanceId);
-            occupied.add(`${mod.x},${mod.y}`);
+            markOccupied(mod.x, mod.y);
         });
 
         const roots = newItems.filter(i => {
             if (visited.has(i.instanceId)) return false;
             if (i.isOrigin) return true;
-            const isFuchsiaSource = connections.some(c => c.sourceId === i.instanceId && c.color.includes('fuchsia'));
-            if (isFuchsiaSource) return false;
-            const incomingFlow = connections.some(c => c.targetId === i.instanceId && !c.color.includes('fuchsia'));
-            return !incomingFlow;
+            // Fuchsia sources with no incoming standard flow are treated as roots
+            const hasIncomingStandard = connections.some(c => c.targetId === i.instanceId && !c.color.includes('fuchsia'));
+            return !hasIncomingStandard;
         });
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
+            // Process specialized fuchsia connections (inputs to this node)
             const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
             incomingFuchsia.forEach(conn => {
                 if (visited.has(conn.sourceId)) return;
                 const fx = cx;
                 const fy = cy - GRID_SIZE;
+                const { tx: finalX, ty: finalY } = findSafePosition(fx, fy, 0, -GRID_SIZE);
                 const source = newItems.find(i => i.instanceId === conn.sourceId);
                 if (source) {
-                    source.x = fx; source.y = fy;
-                    visited.add(source.instanceId); occupied.add(`${fx},${fy}`);
-                    processNode(source.instanceId, fx, fy);
+                    source.x = finalX; source.y = finalY;
+                    visited.add(source.instanceId); markOccupied(finalX, finalY);
+                    processNode(source.instanceId, finalX, finalY);
                 }
             });
 
+            // Process standard outgoing flow
             const outgoing = connections.filter(c => c.sourceId === nodeId && !c.color.includes('fuchsia'));
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                // Recursion logic: only unsnap if the target itself points back to an ancestor
+                // Targeted Recursion Unsnap: Check if the target node itself initiates a blue recursion loop
                 const isPerformingRecursion = connections.some(c => 
                     c.sourceId === conn.targetId && 
-                    c.color.includes('blue') && 
+                    !c.color.includes('emerald') && !c.color.includes('rose') && !c.color.includes('amber') && !c.color.includes('fuchsia') &&
                     isAncestor(c.targetId, conn.targetId, connections)
                 );
 
-                const isStandardBluePath = !conn.color.includes('emerald') && !conn.color.includes('rose') && !conn.color.includes('amber') && !conn.color.includes('fuchsia');
-
                 let step = GRID_SIZE;
-                // If it's a blue line or it's performing recursion, we detach from parent by 1 cell block (64px stride)
-                if (mode === 'grid' && (isPerformingRecursion || isStandardBluePath)) {
+                // If it's a grid view and it's a recursive node, we break from parent by 1 cell block (64px stride)
+                if (mode === 'grid' && isPerformingRecursion) {
                     step = GRID_SIZE * 2; 
+                } else if (mode === 'tether') {
+                    // Tether mode uses a more relaxed spacing
+                    step = GRID_SIZE * 3;
                 }
 
                 let tx = cx, ty = cy;
@@ -283,14 +300,13 @@ export default function App() {
                 else if (conn.sourceSide === 'left') tx -= step;
                 else if (conn.sourceSide === 'top') ty -= step;
 
-                let safety = 0;
-                while (isPositionOccupied(tx, ty) && safety < 10) { tx += GRID_SIZE; safety++; }
+                const { tx: finalX, ty: finalY } = findSafePosition(tx, ty, mode === 'grid' ? GRID_SIZE : 0, mode === 'grid' ? 0 : GRID_SIZE);
 
                 const target = newItems.find(i => i.instanceId === conn.targetId);
                 if (target) {
-                    target.x = tx; target.y = ty;
-                    visited.add(target.instanceId); occupied.add(`${tx},${ty}`);
-                    processNode(target.instanceId, tx, ty);
+                    target.x = finalX; target.y = finalY;
+                    visited.add(target.instanceId); markOccupied(finalX, finalY);
+                    processNode(target.instanceId, finalX, finalY);
                 }
             });
         };
@@ -299,9 +315,11 @@ export default function App() {
         roots.forEach((root, idx) => {
             let startX = root.isOrigin ? snapToGrid(windowSize.w / 2 - 16, 0) : snapToGrid(128 + idx * 256, 0);
             let startY = root.isOrigin ? snapToGrid(windowSize.h * 0.4, HEADER_OFFSET) : snapToGrid(windowSize.h * 0.6 + islandOffsetY, HEADER_OFFSET);
-            root.x = startX; root.y = startY;
-            visited.add(root.instanceId); occupied.add(`${startX},${startY}`);
-            processNode(root.instanceId, startX, startY);
+            
+            const { tx, ty } = findSafePosition(startX, startY, 0, GRID_SIZE);
+            root.x = tx; root.y = ty;
+            visited.add(root.instanceId); markOccupied(tx, ty);
+            processNode(root.instanceId, tx, ty);
             islandOffsetY += 192;
         });
 
