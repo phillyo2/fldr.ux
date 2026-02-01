@@ -505,15 +505,15 @@ export default function App() {
       </main>
 
       {/* Grid-Snapped Command Cluster (Top Right) */}
-      <div className="fixed top-8 right-8 z-[1000] flex flex-col border border-slate-200 rounded-md overflow-hidden shadow-sm">
-         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border-b border-slate-200 last:border-0"><LayoutGrid size={20} className="text-slate-600" /></div>
-         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95"><Waypoints size={20} className="text-slate-600" /></div>
+      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-0">
+         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><LayoutGrid size={20} className="text-slate-600" /></div>
+         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Waypoints size={20} className="text-slate-600" /></div>
       </div>
 
       {/* Grid-Snapped Zoom Cluster (Center Right) */}
-      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col border border-slate-200 rounded-md overflow-hidden shadow-sm">
-         <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border-b border-slate-200"><Plus size={20} className="text-slate-700" /></button>
-         <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95"><Minus size={20} className="text-slate-700" /></button>
+      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col gap-0">
+         <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><Plus size={20} className="text-slate-700" /></button>
+         <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Minus size={20} className="text-slate-700" /></button>
       </div>
 
       {/* Grid-Snapped Toolbox Access (Bottom Left) */}
