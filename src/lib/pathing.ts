@@ -40,14 +40,12 @@ export const isAncestor = (potentialAncestorId: string, potentialDescendantId: s
 };
 
 const isInsideTileExclusion = (p: Point, tiles: CanvasItem[], startPoint: Point, endPoint: Point) => {
-  // Allow path to start and end at the ports
   if ((Math.abs(p.x - startPoint.x) < 5 && Math.abs(p.y - startPoint.y) < 5) ||
       (Math.abs(p.x - endPoint.x) < 5 && Math.abs(p.y - endPoint.y) < 5)) {
     return false;
   }
 
   for (const tile of tiles) {
-    // Node bounds in canvas space (y-56)
     const left = tile.x - 4, right = tile.x + 36;
     const top = (tile.y - 56) - 4, bottom = (tile.y - 56) + 36;
     if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) return true;
@@ -92,7 +90,6 @@ export const getSmartPath = (
   const start = { x: sX, y: sY }, end = { x: tX, y: tY };
   const isRecursion = isAncestor(targetId, sourceId, allConnections);
 
-  // v7.0 Directional Projection
   let sDir = { x: 0, y: 0 };
   if (sourceSide === 'right') sDir.x = 1; 
   else if (sourceSide === 'left') sDir.x = -1; 
@@ -102,7 +99,6 @@ export const getSmartPath = (
   const projectedStart = { x: start.x + sDir.x * 16, y: start.y + sDir.y * 16 };
   const firstGridPoint = { x: snapToGrid(projectedStart.x, 16), y: snapToGrid(projectedStart.y, 16) };
 
-  // Heuristic: Manhattan distance
   const getH = (p: Point) => Math.abs(p.x - end.x) + Math.abs(p.y - end.y);
 
   const openSet: AStarNode[] = [{ 
@@ -122,7 +118,6 @@ export const getSmartPath = (
     const curr = openSet.shift()!;
     const key = `${curr.x},${curr.y}`;
     
-    // Target proximity detection
     if (Math.abs(curr.x - end.x) < 20 && Math.abs(curr.y - end.y) < 20) { 
       finalNode = curr; 
       break; 
@@ -133,22 +128,17 @@ export const getSmartPath = (
 
     const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
     for (const d of dirs) {
-      // Prevent immediate backtracking
       if (curr.direction && d.x === -curr.direction.x && d.y === -curr.direction.y) continue;
       
       const n = { x: curr.x + d.x * GRID_SIZE, y: curr.y + d.y * GRID_SIZE };
       const nKey = `${n.x},${n.y}`;
       if (closedSet.has(nKey)) continue;
 
-      // Solid Obstacle Avoidance
       const isBlocked = isInsideTileExclusion(n, tiles, start, end);
       if (isBlocked && !isRecursion) continue; 
       
       const obstacleCost = isBlocked ? OBSTACLE_PENALTY : 0;
       const turnCost = (curr.direction && (d.x !== curr.direction.x || d.y !== curr.direction.y)) ? TURN_PENALTY : 0;
-      
-      // Smart Congestion Awareness (Pseudo-parallel avoidance)
-      // If we are recursion, we strongly avoid the grid's main y-trunk
       const recursionPenalty = (isRecursion && Math.abs(n.x - snapToGrid(start.x, 16)) < 64) ? 400 : 0;
 
       const g = curr.g + GRID_SIZE + turnCost + obstacleCost + recursionPenalty;

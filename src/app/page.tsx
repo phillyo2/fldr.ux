@@ -147,7 +147,7 @@ export default function App() {
     items.forEach(other => {
       if (other.instanceId === dId) return;
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
-      
+
       LATCH_POINTS.forEach(lSource => {
         const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
         const sPos = getPortPos(dragNode, lSource.id);
@@ -210,7 +210,7 @@ export default function App() {
         const findSafePosition = (startX: number, startY: number, stepX: number, stepY: number) => {
             let tx = startX, ty = startY;
             let safety = 0;
-            while (isPositionOccupied(tx, ty) && safety < 50) {
+            while (isPositionOccupied(tx, ty) && safety < 100) {
                 tx += stepX;
                 ty += stepY;
                 safety++;
@@ -218,39 +218,15 @@ export default function App() {
             return { tx, ty };
         };
 
-        const modifiers = newItems.filter(i => !i.isOrigin && !connections.some(c => c.sourceId === i.instanceId || c.targetId === i.instanceId));
-        const modCols = 4;
-        modifiers.forEach((mod, idx) => {
-            const col = idx % modCols;
-            const row = Math.floor(idx / modCols);
-            const startX = snapToGrid(windowSize.w / 2 - (modCols * GRID_SIZE) / 2 + col * GRID_SIZE, 0);
-            const startY = snapToGrid(HEADER_OFFSET + row * GRID_SIZE, HEADER_OFFSET);
-            const { tx, ty } = findSafePosition(startX, startY, GRID_SIZE, 0);
-            mod.x = tx; mod.y = ty;
-            visited.add(mod.instanceId);
-            markOccupied(mod.x, mod.y);
-        });
-
-        const roots = newItems.filter(i => {
-            if (visited.has(i.instanceId)) return false;
-            if (i.isOrigin) return true;
-            const hasIncoming = connections.some(c => c.targetId === i.instanceId);
-            return !hasIncoming;
-        });
+        const incomingTargetIds = new Set(connections.map(c => c.targetId));
+        const roots = newItems.filter(i => i.isOrigin || !incomingTargetIds.has(i.instanceId));
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
             const outgoing = connections.filter(c => c.sourceId === nodeId);
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                const isPerformingRecursion = isAncestor(conn.targetId, conn.sourceId, connections);
-
-                let step = GRID_SIZE;
-                if (mode === 'grid' && isPerformingRecursion) {
-                    step = GRID_SIZE * 2; 
-                } else if (mode === 'tether') {
-                    step = GRID_SIZE * 1.5;
-                }
+                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
 
                 let tx = cx, ty = cy;
                 if (conn.sourceSide === 'bottom') ty += step;
@@ -258,7 +234,12 @@ export default function App() {
                 else if (conn.sourceSide === 'left') tx -= step;
                 else if (conn.sourceSide === 'top') ty -= step;
 
-                const { tx: finalX, ty: finalY } = findSafePosition(tx, ty, mode === 'grid' ? GRID_SIZE : 0, mode === 'grid' ? 0 : GRID_SIZE);
+                const { tx: finalX, ty: finalY } = findSafePosition(
+                    snapToGrid(tx, 0), 
+                    snapToGrid(ty, HEADER_OFFSET), 
+                    mode === 'grid' ? GRID_SIZE : 0, 
+                    mode === 'grid' ? 0 : GRID_SIZE
+                );
 
                 const target = newItems.find(i => i.instanceId === conn.targetId);
                 if (target) {
@@ -270,19 +251,38 @@ export default function App() {
         };
 
         let islandOffsetY = 0;
-        roots.forEach((root, idx) => {
-            // Islands are now pulled closer to the origin (160px offset) rather than being scattered.
-            let startX = root.isOrigin ? snapToGrid(windowSize.w / 2 - 16, 0) : snapToGrid(windowSize.w / 2 - 160, 0);
-            let startY = root.isOrigin ? snapToGrid(windowSize.h * 0.4, HEADER_OFFSET) : snapToGrid(windowSize.h * 0.4 + 96 + islandOffsetY, HEADER_OFFSET);
-            
+        const origin = roots.find(r => r.isOrigin);
+        const islands = roots.filter(r => !r.isOrigin);
+
+        if (origin) {
+            const startX = snapToGrid(windowSize.w / 2 - 16, 0);
+            const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
+            origin.x = startX; origin.y = startY;
+            visited.add(origin.instanceId); markOccupied(startX, startY);
+            processNode(origin.instanceId, startX, startY);
+        }
+
+        islands.forEach((root) => {
+            const startX = snapToGrid(windowSize.w / 2 - 160, 0);
+            const startY = snapToGrid(windowSize.h * 0.4 + islandOffsetY, HEADER_OFFSET);
             const { tx, ty } = findSafePosition(startX, startY, 0, GRID_SIZE);
             root.x = tx; root.y = ty;
             visited.add(root.instanceId); markOccupied(tx, ty);
             processNode(root.instanceId, tx, ty);
-            islandOffsetY += 64; // Smaller vertical gap between islands
+            islandOffsetY += 64;
         });
 
-        const origin = newItems.find(i => i.isOrigin);
+        newItems.forEach(item => {
+            if (!visited.has(item.instanceId)) {
+                const startX = snapToGrid(windowSize.w / 2 - 160, 0);
+                const startY = snapToGrid(windowSize.h * 0.4 + islandOffsetY, HEADER_OFFSET);
+                const { tx, ty } = findSafePosition(startX, startY, 0, GRID_SIZE);
+                item.x = tx; item.y = ty;
+                visited.add(item.instanceId); markOccupied(tx, ty);
+                islandOffsetY += 48;
+            }
+        });
+
         if (origin) {
             const vx = - (origin.x - (windowSize.w / 2) + 16);
             const vy = - (origin.y - (windowSize.h / 2) + 16);
@@ -552,7 +552,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* Discrete Studio UI Action Tiles - Fixed 28px Offset */}
       <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <LayoutGrid size={20} className="text-slate-600" />
       </div>
