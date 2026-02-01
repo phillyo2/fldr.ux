@@ -513,9 +513,13 @@ export default function App() {
                           // Parent dots ALWAYS stay visible if connected or guidance exists
                           const isVisible = (isGuidance || isConnected);
                           
-                          const c = lp.color.includes('rose') ? 'bg-rose-500' : 
-                                    lp.color.includes('emerald') ? 'bg-emerald-500' : 
-                                    lp.color.includes('fuchsia') ? 'bg-fuchsia-500' : 'bg-amber-400';
+                          // Dynamic color based on actual connection or ghost status
+                          const activeColor = outgoingLink ? outgoingLink.color : (ghost ? ghost.color : lp.color);
+                          const c = activeColor.includes('rose') ? 'bg-rose-500' : 
+                                    activeColor.includes('emerald') ? 'bg-emerald-500' : 
+                                    activeColor.includes('fuchsia') ? 'bg-fuchsia-500' : 
+                                    activeColor.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
+
                           return (
                             <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2001]
                                     ${isConnected ? c : 'bg-slate-300'}
