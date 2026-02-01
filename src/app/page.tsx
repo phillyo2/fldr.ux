@@ -378,7 +378,7 @@ export default function App() {
       
       if (isPanning) {
         const dx = clientX - panStart.current.x;
-        const dy = clientY - parent.current ? (clientY - panStart.current.y) : 0;
+        const dy = clientY - panStart.current.y;
         setViewOffset({ x: panOffsetStart.current.x + dx, y: panOffsetStart.current.y + dy });
         return;
       }
@@ -502,6 +502,7 @@ export default function App() {
                             opacityClass = 'opacity-100 scale-100';
 
                             // Proximity-Based Dot Culling: Hide dot if snapped directly to its counterpart anchor
+                            // Recalibrated to 24px to catch adjacent-cell diagonals while excluding 64px recursive gaps
                             const connection = connectedAsSource || connectedAsTarget || (tethered ? activeTether : null);
                             if (connection) {
                               const isSource = (connection.sourceId === item.instanceId && connection.sourceSide === lp.id);
@@ -515,8 +516,9 @@ export default function App() {
                                 const myY = item.y + lp.y * 32;
                                 const itsX = otherItem.x + otherLp.x * 32;
                                 const itsY = otherItem.y + otherLp.y * 32;
+                                const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
 
-                                if (Math.abs(myX - itsX) < 1 && Math.abs(myY - itsY) < 1) {
+                                if (dist < 24) {
                                   opacityClass = 'opacity-0 scale-50';
                                 }
                               }
