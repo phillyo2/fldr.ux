@@ -262,18 +262,22 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                const targetIsPerformingRecursion = connections.some(c => 
-                  c.sourceId === conn.targetId && 
-                  !c.color.includes('emerald') && 
-                  !c.color.includes('rose') && 
-                  !c.color.includes('amber') &&
-                  !c.color.includes('fuchsia') &&
-                  isAncestor(c.targetId, conn.targetId, connections)
+                const isPerformingRecursion = connections.some(c => 
+                    c.sourceId === conn.targetId && 
+                    !c.color.includes('emerald') && 
+                    !c.color.includes('rose') && 
+                    !c.color.includes('amber') &&
+                    !c.color.includes('fuchsia') &&
+                    isAncestor(c.targetId, conn.targetId, connections)
                 );
 
+                const isStandardBluePath = !conn.color.includes('emerald') && !conn.color.includes('rose') && !conn.color.includes('amber') && !conn.color.includes('fuchsia');
+
                 let step = GRID_SIZE;
-                if (mode === 'tether' || (mode === 'grid' && targetIsPerformingRecursion)) {
+                if (mode === 'grid' && (isPerformingRecursion || isStandardBluePath)) {
                     step = GRID_SIZE * 2; 
+                } else if (mode === 'tether') {
+                    step = GRID_SIZE * 2;
                 }
 
                 let tx = cx, ty = cy;
@@ -525,6 +529,27 @@ export default function App() {
                                   const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
 
                                   if (dist < 24 && dotColor !== 'bg-fuchsia-500') {
+                                    opacityClass = 'opacity-0 scale-50';
+                                  }
+                                }
+                              } else {
+                                // Parent Port Logic
+                                const otherId = connection.targetId;
+                                const otherSide = connection.targetSide;
+                                const otherItem = canvasItems.find(i => i.instanceId === otherId);
+                                const otherLp = LATCH_POINTS.find(p => p.id === otherSide);
+
+                                if (otherItem && otherLp) {
+                                  const myX = item.x + lp.x * 32;
+                                  const myY = item.y + lp.y * 32;
+                                  const itsX = otherItem.x + otherLp.x * 32;
+                                  const itsY = otherItem.y + otherLp.y * 32;
+                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
+
+                                  const hasIncomingFlow = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && !c.color.includes('fuchsia'));
+                                  const isIsolatedInput = item.isOrigin || !hasIncomingFlow;
+
+                                  if (dist < 24 && lp.id === 'bottom' && isIsolatedInput) {
                                     opacityClass = 'opacity-0 scale-50';
                                   }
                                 }
