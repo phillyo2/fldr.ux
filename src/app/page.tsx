@@ -148,7 +148,6 @@ export default function App() {
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
 
-    // Fuchsia Isolation: If this node is already an isolated input provider, it is LOCKED.
     const isDragFuchsiaProvider = connRef.current.some(c => c.sourceId === dId && c.color.includes('fuchsia'));
     if (isDragFuchsiaProvider) return [];
     
@@ -165,15 +164,11 @@ export default function App() {
     items.forEach(other => {
       if (other.instanceId === dId) return;
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
-
-      // Fuchsia Isolation Check: If other node is already an isolated input provider, ignore it.
       const isOtherFuchsiaProvider = connRef.current.some(c => c.sourceId === other.instanceId && c.color.includes('fuchsia'));
       if (isOtherFuchsiaProvider) return;
       
       LATCH_POINTS.forEach(lSource => {
         const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
-
-        // 1. Drag Node is Source -> Other is Target
         const sPos = getPortPos(dragNode, lSource.id);
         const tPos = getPortPos(other, lTarget.id);
         const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
@@ -181,66 +176,37 @@ export default function App() {
         if (dist < DETECTION_RANGE) {
           let color = lSource.color.replace('bg-', '');
           let valid = false;
-
-          // Fuchsia Rule: Floating Source -> Tree Target (Top Port)
           if (!dragCtx && otherCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
             const dragHasAnyConnection = connRef.current.some(c => c.sourceId === dId || c.targetId === dId);
-            if (!dragHasAnyConnection) {
-              valid = true;
-              color = 'fuchsia-500';
-            }
+            if (!dragHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
           }
-          // Standard Rule: Tree Node -> Floating Target
-          else if (dragCtx && !otherCtx && lSource.id !== 'top') {
-             valid = true;
-          }
-          // Recursion: Descendant -> Ancestor
+          else if (dragCtx && !otherCtx && lSource.id !== 'top') { valid = true; }
           else if (dragCtx && otherCtx && dragCtx === otherCtx) {
             if (isAncestor(other.instanceId, dId, connRef.current)) {
-              if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') {
-                valid = true;
-                color = 'blue-500';
-              }
+              if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') { valid = true; color = 'blue-500'; }
             }
           }
-
-          if (valid) {
-            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
-          }
+          if (valid) ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
         }
 
-        // 2. Other is Source -> Drag Node is Target
         const sPosInv = getPortPos(other, lSource.id);
         const tPosInv = getPortPos(dragNode, lTarget.id);
         const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
-
         if (distInv < DETECTION_RANGE) {
           let color = lSource.color.replace('bg-', '');
           let valid = false;
-
-          // Tree node source -> Floating target
           if (otherCtx && !dragCtx && lSource.id !== 'top') {
             const dragHasAnyConnection = connRef.current.some(c => c.sourceId === dId || c.targetId === dId);
-            if (!dragHasAnyConnection) {
-              valid = true;
-            }
+            if (!dragHasAnyConnection) valid = true;
           }
-          // Floating Source -> Tree Target (Fuchsia)
           if (!otherCtx && dragCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
              const otherHasAnyConnection = connRef.current.some(c => c.sourceId === other.instanceId || c.targetId === other.instanceId);
-             if (!otherHasAnyConnection) {
-               valid = true;
-               color = 'fuchsia-500';
-             }
+             if (!otherHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
           }
-
-          if (valid) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
-          }
+          if (valid) ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
         }
       });
     });
-
     return ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
   };
 
@@ -274,16 +240,19 @@ export default function App() {
         const roots = newItems.filter(i => {
             if (visited.has(i.instanceId)) return false;
             if (i.isOrigin) return true;
+            
+            // Exclude fuchsia sources from being roots; they are processed by their targets
+            const isFuchsiaSource = connections.some(c => c.sourceId === i.instanceId && c.color.includes('fuchsia'));
+            if (isFuchsiaSource) return false;
+
             // A root has no incoming standard flow connections
             const incomingFlow = connections.some(c => c.targetId === i.instanceId && !c.color.includes('fuchsia'));
             return !incomingFlow;
         });
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
-            const outgoing = connections.filter(c => c.sourceId === nodeId);
-            const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
-
             // Fuchsia (Isolated Inputs) - Place 1 cell block above target
+            const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
             incomingFuchsia.forEach(conn => {
                 if (visited.has(conn.sourceId)) return;
                 const fx = cx;
@@ -292,13 +261,14 @@ export default function App() {
                 if (source) {
                     source.x = fx; source.y = fy;
                     visited.add(source.instanceId); occupied.add(`${fx},${fy}`);
+                    processNode(source.instanceId, fx, fy);
                 }
             });
 
             // Standard Flow Directions
+            const outgoing = connections.filter(c => c.sourceId === nodeId && !c.color.includes('fuchsia'));
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
-                if (conn.color.includes('fuchsia')) return;
 
                 let tx = cx, ty = cy;
                 const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
@@ -422,7 +392,6 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
-        // Persistence Protocol: Lock the tether until we find a new one or move far away
         const currentActiveGhost = ghosts.find((g: any) => 
           g.sourceId === activeTether.sourceId && 
           g.targetId === activeTether.targetId &&
@@ -467,13 +436,11 @@ export default function App() {
           const source = prev.find(i => i.instanceId === activeTether.sourceId);
           if (target && source) {
              if (draggingId === activeTether.sourceId) {
-                // Dragging source (Input) to target (Tree)
                 if (activeTether.sourceSide === 'bottom' && activeTether.targetSide === 'top') { finalX = target.x; finalY = target.y - GRID_SIZE; }
                 else if (activeTether.sourceSide === 'right' && activeTether.targetSide === 'left') { finalX = target.x - GRID_SIZE; finalY = target.y; }
                 else if (activeTether.sourceSide === 'left' && activeTether.targetSide === 'right') { finalX = target.x + GRID_SIZE; finalY = target.y; }
                 else if (activeTether.sourceSide === 'top' && activeTether.targetSide === 'bottom') { finalX = target.x; finalY = target.y + GRID_SIZE; }
              } else {
-                // Dragging target (Tree) to source (Input)
                 if (activeTether.targetSide === 'top' && activeTether.sourceSide === 'bottom') { finalX = source.x; finalY = source.y + GRID_SIZE; }
                 else if (activeTether.targetSide === 'left' && activeTether.sourceSide === 'right') { finalX = source.x + GRID_SIZE; finalY = source.y; }
                 else if (activeTether.targetSide === 'right' && activeTether.sourceSide === 'left') { finalX = source.x - GRID_SIZE; finalY = source.y; }
