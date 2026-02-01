@@ -271,14 +271,15 @@ export default function App() {
 
         let islandOffsetY = 0;
         roots.forEach((root, idx) => {
-            let startX = root.isOrigin ? snapToGrid(windowSize.w / 2 - 16, 0) : snapToGrid(128 + idx * 256, 0);
-            let startY = root.isOrigin ? snapToGrid(windowSize.h * 0.4, HEADER_OFFSET) : snapToGrid(windowSize.h * 0.6 + islandOffsetY, HEADER_OFFSET);
+            // Islands are now pulled closer to the origin (160px offset) rather than being scattered.
+            let startX = root.isOrigin ? snapToGrid(windowSize.w / 2 - 16, 0) : snapToGrid(windowSize.w / 2 - 160, 0);
+            let startY = root.isOrigin ? snapToGrid(windowSize.h * 0.4, HEADER_OFFSET) : snapToGrid(windowSize.h * 0.4 + 96 + islandOffsetY, HEADER_OFFSET);
             
             const { tx, ty } = findSafePosition(startX, startY, 0, GRID_SIZE);
             root.x = tx; root.y = ty;
             visited.add(root.instanceId); markOccupied(tx, ty);
             processNode(root.instanceId, tx, ty);
-            islandOffsetY += 96;
+            islandOffsetY += 64; // Smaller vertical gap between islands
         });
 
         const origin = newItems.find(i => i.isOrigin);
