@@ -12,7 +12,7 @@ import {
   DRAG_THRESHOLD, LONG_PRESS_MS, LATCH_POINTS, GRID_SIZE 
 } from '@/lib/constants';
 import { getSmartPath, snapToGrid } from '@/lib/pathing';
-import { calculateGhostHandshakes, getPortState } from '@/lib/handshake-engine';
+import { calculateGhostHandshakes, getPortState, getTreeContext } from '@/lib/handshake-engine';
 
 export default function App() {
   // --- STATE ---
@@ -186,7 +186,7 @@ export default function App() {
     setTimeout(() => setIsTransitioning(false), 600);
   };
 
-  const handleSmartBirth = (item: Partial<FolderItem>) => {
+  const handleSmartBirth = (item: FolderItem) => {
     // Current viewport center in world space
     const viewCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const viewCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
@@ -194,7 +194,7 @@ export default function App() {
     let spawnX = snapToGrid(viewCenterX - 16, 0);
     let spawnY = snapToGrid(viewCenterY - 16, HEADER_OFFSET);
 
-    // Smart Proximity System: Find nearest OUTPUT anchor (Red/Green) to the center of the screen
+    // Smart Tree Proximity System: Find nearest OUTPUT anchor (Red/Green) that is already part of a tree
     let nearestDist = Infinity;
     let targetX = spawnX;
     let targetY = spawnY;
@@ -203,6 +203,10 @@ export default function App() {
     const priorityPorts = LATCH_POINTS.filter(lp => lp.id === 'bottom' || lp.id === 'right');
 
     canvasItems.forEach(ci => {
+      // Check if this node is part of a tree context
+      const context = getTreeContext(ci.instanceId, connections);
+      if (!context && !ci.isOrigin && !ci.isTrigger) return; 
+
       priorityPorts.forEach(lp => {
         const px = ci.x + lp.x * 32;
         const py = ci.y - HEADER_OFFSET + lp.y * 32;
