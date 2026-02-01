@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -153,35 +152,54 @@ export default function App() {
       return;
     }
 
-    // Standard Logic Spawning (Nearby Anchor)
+    // --- Smart Spawning Engine ---
     let spawnX = screenCenterX;
     let spawnY = screenCenterY;
     
-    const candidates: {x: number, y: number, dist: number}[] = [];
+    const candidates: {x: number, y: number, dist: number, side: string}[] = [];
+    
+    // Scan for tree-associated output anchors
     canvasItems.forEach(i => {
       const isPartOfTree = getTreeContext(i.instanceId, connections);
-      if (!isPartOfTree) return;
+      const isEntry = i.isTrigger || i.isOrigin;
       
+      // Filter candidates: parts of trees, or Entry Points if no trees exist
+      if (!isPartOfTree && !isEntry) return;
+
       LATCH_POINTS.forEach(lp => {
+        // Specifically target output anchor ports (Red/Right, Green/Bottom)
         if (lp.id !== 'bottom' && lp.id !== 'right') return;
+        
         const px = i.x + (lp.id === 'right' ? 32 : 16);
         const py = i.y - HEADER_OFFSET + (lp.id === 'bottom' ? 32 : 16);
         const dist = Math.sqrt(Math.pow(px - screenCenterX, 2) + Math.pow(py - screenCenterY, 2));
-        candidates.push({ x: px + (lp.id === 'right' ? 64 : 0), y: py + (lp.id === 'bottom' ? 64 : 0), dist });
+        
+        candidates.push({ 
+          x: px + (lp.id === 'right' ? 64 : 0), 
+          y: py + (lp.id === 'bottom' ? 64 : 0), 
+          dist, 
+          side: lp.id 
+        });
       });
     });
 
+    // If we have candidates, pick the one closest to the center
     if (candidates.length > 0) {
       const best = candidates.sort((a, b) => a.dist - b.dist)[0];
       spawnX = best.x - 16;
       spawnY = best.y + HEADER_OFFSET - 16;
     }
 
-    // Occupancy check
+    // --- Smart Occupancy Engine ---
+    // Prevent overlapping by finding the next available slot in the flow direction
     let safety = 0;
     const occupied = new Set(canvasItems.map(i => `${snapToGrid(i.x, 0)},${snapToGrid(i.y, HEADER_OFFSET)}`));
+    
     while (occupied.has(`${snapToGrid(spawnX, 0)},${snapToGrid(spawnY, HEADER_OFFSET)}`) && safety < 100) {
-      spawnY += GRID_SIZE;
+      // Find the anchor we were targeting to determine "natural" flow direction
+      const flowDir = candidates.length > 0 ? candidates.sort((a,b) => a.dist - b.dist)[0].side : 'bottom';
+      if (flowDir === 'right') spawnX += GRID_SIZE;
+      else spawnY += GRID_SIZE;
       safety++;
     }
 
@@ -196,8 +214,9 @@ export default function App() {
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
-    // Smooth Pan to new tile
+    // --- Soft Panning Transition ---
     setIsTransitioning(true);
+    // Center the viewport on the newly birthed tile
     const targetVX = windowSize.w / 2 - (newItem.x + 16) * zoom;
     const targetVY = windowSize.h / 2 - (newItem.y - HEADER_OFFSET + 16) * zoom;
     setViewOffset({ x: targetVX, y: targetVY });
