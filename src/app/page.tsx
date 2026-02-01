@@ -412,31 +412,54 @@ export default function App() {
                     )
                 })}
 
+                {/* --- LATCH POINTS RENDERING (TWO PASSES FOR PARENT-ON-TOP) --- */}
+                
+                {/* PASS 1: Child Ports (Inputs - Blue) */}
                 {canvasItems.map(item => {
                   const involvesRecursion = draggingId && isDescendantOf(item.instanceId, draggingId, connRef.current);
                   return (
-                    <div key={`latch_group_${item.instanceId}`} className="absolute pointer-events-none" style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                        {LATCH_POINTS.map(lp => {
+                    <div key={`latch_inputs_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1001]' : 'z-20'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                        {LATCH_POINTS.filter(lp => lp.type === 'input').map(lp => {
                           const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                          
+                          const isGuidance = !!ghost;
+                          const isConnected = !!outgoingLink || !!incomingLink;
+                          const isVisible = isGuidance || isConnected;
+                          const c = lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300';
+
+                          return (
+                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2000]
+                                    ${isConnected ? c : 'bg-slate-300'}
+                                    ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
+                                    ${ghost ? 'ring-4 ring-slate-200 scale-150 animate-pulse' : ''}
+                                `} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} 
+                            />
+                          );
+                        })}
+                    </div>
+                  );
+                })}
+
+                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow) */}
+                {canvasItems.map(item => {
+                  return (
+                    <div key={`latch_parents_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1002]' : 'z-21'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                        {LATCH_POINTS.filter(lp => lp.type !== 'input').map(lp => {
+                          const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
+                          const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
+                          const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           const isGuidance = !!ghost;
                           const isConnected = !!outgoingLink || !!incomingLink;
                           const isVisible = isGuidance || isConnected;
                           
-                          const isForbiddenRecursion = involvesRecursion && lp.id !== 'top';
-                          
-                          const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : lp.color.includes('blue') ? 'bg-blue-500' : 'bg-amber-400';
-                          
-                          const isParent = lp.type !== 'input';
-                          const zIndexClass = isParent ? 'z-[2001]' : 'z-[2000]';
+                          const c = lp.color.includes('rose') ? 'bg-rose-500' : lp.color.includes('emerald') ? 'bg-emerald-500' : 'bg-amber-400';
 
                           return (
-                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm ${zIndexClass}
+                            <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2001]
                                     ${isConnected ? c : 'bg-slate-300'}
                                     ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}
-                                    ${ghost ? (isForbiddenRecursion ? 'bg-slate-400 opacity-50 grayscale' : 'ring-4 ring-slate-200 scale-150 animate-pulse') : ''}
+                                    ${ghost ? 'ring-4 ring-slate-200 scale-150 animate-pulse' : ''}
                                 `} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} 
                             />
                           );
