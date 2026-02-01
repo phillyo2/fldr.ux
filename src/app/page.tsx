@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Trash2, X, LayoutGrid, Waypoints, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
@@ -66,12 +66,11 @@ export default function App() {
   useEffect(() => { itemsRef.current = canvasItems; }, [canvasItems]);
   useEffect(() => { connRef.current = connections; }, [connections]);
 
-  const lastTap = useRef(0);
-  const pressTimer = useRef<NodeJS.Timeout | null>(null);
   const mouseOffset = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
   const panOffsetStart = useRef({ x: 0, y: 0 });
   const lastValidPos = useRef({ x: 128, y: 128 + HEADER_OFFSET });
+  const pressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const [editingItem, setEditingItem] = useState<CanvasItem | null>(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
@@ -96,12 +95,23 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
-  // --- TREE LOGIC ---
+  const isAncestor = (potentialAncestorId: string, potentialDescendantId: string, conns: Connection[]) => {
+    const visited = new Set<string>();
+    const stack = [potentialAncestorId];
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      if (node === potentialDescendantId) return true;
+      if (visited.has(node)) continue;
+      visited.add(node);
+      conns.filter(c => c.sourceId === node).forEach(c => stack.push(c.targetId));
+    }
+    return false;
+  };
+
   const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
     const contexts = new Map<string, string>();
     const visited = new Set<string>();
     const queue: {id: string, context: string}[] = [{id: 'entry_origin', context: 'main'}];
-    
     contexts.set('entry_origin', 'main');
 
     while(queue.length > 0) {
@@ -111,7 +121,6 @@ export default function App() {
 
       const outgoing = currentConnections.filter(c => c.sourceId === id && !c.color.includes('fuchsia'));
       for (const conn of outgoing) {
-        // Yellow (Amber) creates a new isolated context
         const nextContext = conn.color.includes('amber') ? `sub_${conn.targetId}` : context;
         contexts.set(conn.targetId, nextContext);
         queue.push({id: conn.targetId, context: nextContext});
@@ -124,6 +133,94 @@ export default function App() {
     return !!getTreeContext(nodeId, connRef.current);
   };
 
+  const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
+    const ghosts: Connection[] = [];
+    const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
+    if (!dragNode) return ghosts;
+    
+    const dragCtx = getTreeContext(dId, connRef.current);
+
+    const getPortPos = (item: any, side: string) => {
+      if (side === 'top') return { x: item.x + 16, y: item.y };
+      if (side === 'bottom') return { x: item.x + 16, y: item.y + 32 };
+      if (side === 'right') return { x: item.x + 32, y: item.y + 16 };
+      if (side === 'left') return { x: item.x, y: item.y + 16 };
+      return { x: item.x + 16, y: item.y + 16 };
+    };
+
+    items.forEach(other => {
+      if (other.instanceId === dId) return;
+      const otherCtx = getTreeContext(other.instanceId, connRef.current);
+      
+      LATCH_POINTS.forEach(lSource => {
+        const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
+
+        // 1. Drag Node is Source -> Other is Target
+        const sPos = getPortPos(dragNode, lSource.id);
+        const tPos = getPortPos(other, lTarget.id);
+        const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
+
+        if (dist < DETECTION_RANGE) {
+          let color = lSource.color.replace('bg-', '');
+          let valid = false;
+
+          // Standard Expansion: Dragging floating node onto tree node
+          if (dragCtx && !otherCtx && lSource.id !== 'top') valid = true;
+          
+          // Recursion: Dragged Descendant -> Ancestor
+          // Only allowed from Green (bottom) or Red (right) ports to ancestor Top (blue)
+          if (dragCtx && otherCtx && dragCtx === otherCtx) {
+            if (isAncestor(other.instanceId, dId, connRef.current)) {
+              if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') {
+                valid = true;
+                color = 'blue-500'; // Signify jump
+              }
+            }
+          }
+
+          if (valid) {
+            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
+          }
+        }
+
+        // 2. Other is Source -> Drag Node is Target
+        const sPosInv = getPortPos(other, lSource.id);
+        const tPosInv = getPortPos(dragNode, lTarget.id);
+        const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
+
+        if (distInv < DETECTION_RANGE) {
+          let color = lSource.color.replace('bg-', '');
+          let valid = false;
+
+          // Standard Expansion: Dragging tree node source to floating target
+          if (otherCtx && !dragCtx && lSource.id !== 'top') valid = true;
+
+          // Recursion: Ancestor Source -> Dragged Descendant Target
+          if (dragCtx && otherCtx && dragCtx === otherCtx) {
+             if (isAncestor(dId, other.instanceId, connRef.current)) {
+               if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') {
+                 valid = true;
+                 color = 'blue-500';
+               }
+             }
+          }
+
+          // Isolated Input: Floating source -> Tree Top
+          if (!otherCtx && dragCtx && lTarget.id === 'top' && lSource.id !== 'top') {
+            color = 'fuchsia-500';
+            valid = true;
+          }
+
+          if (valid) {
+            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
+          }
+        }
+      });
+    });
+
+    return ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
+  };
+
   const gatherLayout = (mode: 'grid' | 'tether') => {
     setCanvasItems(prev => {
       const newItems = prev.map(item => ({ ...item }));
@@ -134,10 +231,9 @@ export default function App() {
       const minGap = mode === 'tether' ? GRID_SIZE : 0;
       
       const isPositionOccupied = (x: number, y: number) => {
-        const threshold = 1; 
         for (const pos of occupied) {
           const [ox, oy] = pos.split(',').map(Number);
-          if (Math.abs(ox - x) < threshold && Math.abs(oy - y) < threshold) return true;
+          if (Math.abs(ox - x) < 1 && Math.abs(oy - y) < 1) return true;
         }
         return false;
       };
@@ -169,7 +265,6 @@ export default function App() {
           }
         });
 
-        // Position isolated inputs
         const inputs = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
         inputs.forEach(conn => {
           if (visited.has(conn.sourceId)) return;
@@ -185,82 +280,6 @@ export default function App() {
     });
   };
 
-  const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
-    const ghosts: Connection[] = [];
-    const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
-    if (!dragNode) return ghosts;
-    
-    const dragCtx = getTreeContext(dId, connRef.current);
-
-    items.forEach(other => {
-      if (other.instanceId === dId) return;
-      const otherCtx = getTreeContext(other.instanceId, connRef.current);
-      
-      const getPortPos = (item: any, side: string) => {
-        if (side === 'top') return { x: item.x + 16, y: item.y };
-        if (side === 'bottom') return { x: item.x + 16, y: item.y + 32 };
-        if (side === 'right') return { x: item.x + 32, y: item.y + 16 };
-        if (side === 'left') return { x: item.x, y: item.y + 16 };
-        return { x: item.x + 16, y: item.y + 16 };
-      };
-
-      LATCH_POINTS.forEach(lSource => {
-        // Source is Parent, Target is Child (Standard Top Input)
-        const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
-
-        // 1. Drag Node is Source (Ancestor) -> Other is Target (Descendant)
-        const sPos = getPortPos(dragNode, lSource.id);
-        const tPos = getPortPos(other, lTarget.id);
-        const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
-
-        if (dist < DETECTION_RANGE) {
-          let color = '';
-          if (lSource.id === 'bottom') color = 'bg-emerald-500';
-          else if (lSource.id === 'right') color = 'bg-rose-500';
-          else if (lSource.id === 'left') color = 'bg-amber-400';
-          else if (lSource.id === 'top') color = 'bg-blue-500';
-
-          let valid = false;
-          // Tree Expansion: Tree Source -> Floating Target
-          if (dragCtx && !otherCtx) valid = true;
-          // Recursion: Same Tree Context
-          if (dragCtx && otherCtx && dragCtx === otherCtx) valid = true;
-
-          if (valid) {
-            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
-          }
-        }
-
-        // 2. Other is Source (Ancestor) -> Drag Node is Target (Descendant)
-        const sPosInv = getPortPos(other, lSource.id);
-        const tPosInv = getPortPos(dragNode, lTarget.id);
-        const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
-
-        if (distInv < DETECTION_RANGE) {
-          let color = '';
-          if (lSource.id === 'bottom') color = 'bg-emerald-500';
-          else if (lSource.id === 'right') color = 'bg-rose-500';
-          else if (lSource.id === 'left') color = 'bg-amber-400';
-          else if (lSource.id === 'top') color = 'bg-blue-500';
-
-          let valid = false;
-          // Tree Expansion: Tree Source -> Floating Target
-          if (otherCtx && !dragCtx) valid = true;
-          // Recursion: Same Tree Context
-          if (dragCtx && otherCtx && dragCtx === otherCtx) valid = true;
-          // Isolated Input: Floating Source -> Tree Top Input
-          if (!otherCtx && dragCtx && lTarget.id === 'top') { color = 'bg-fuchsia-500'; valid = true; }
-
-          if (valid) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
-          }
-        }
-      });
-    });
-
-    return ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
-  };
-
   const handleSmartBirth = (item: Partial<FolderItem>) => {
     const spawnX = snapToGrid(-viewOffset.x + 32, 0);
     const spawnY = snapToGrid(-viewOffset.y + 32 + HEADER_OFFSET, HEADER_OFFSET);
@@ -270,18 +289,19 @@ export default function App() {
 
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
     const now = Date.now();
-    if (now - lastTap.current < 300) {
-      const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
-      const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
-      if (currentPageId !== 'home') {
-        setIsPanning(true); panStart.current = { x: clientX, y: clientY }; panOffsetStart.current = { ...viewOffset };
-      }
+    const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
+    const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
+    
+    if (currentPageId !== 'home') {
+      setIsPanning(true); 
+      panStart.current = { x: clientX, y: clientY }; 
+      panOffsetStart.current = { ...viewOffset };
     }
-    lastTap.current = now;
   };
 
   const handleItemPointerDown = (e: React.MouseEvent | React.TouchEvent, item: CanvasItem) => {
-    e.stopPropagation(); const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
+    e.stopPropagation(); 
+    const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     setDragStartPos({ id: item.instanceId, x: clientX, y: clientY });
     mouseOffset.current = { x: clientX - item.x, y: clientY - item.y };
@@ -310,37 +330,53 @@ export default function App() {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
+      
       if (dragStartPos && !isDragging) {
           const dist = Math.sqrt(Math.pow(clientX - dragStartPos.x, 2) + Math.pow(clientY - dragStartPos.y, 2));
-          if (dist > DRAG_THRESHOLD) { setIsDragging(true); setDraggingId(dragStartPos.id); if (pressTimer.current) clearTimeout(pressTimer.current); }
+          if (dist > DRAG_THRESHOLD) { 
+            setIsDragging(true); 
+            setDraggingId(dragStartPos.id); 
+            if (pressTimer.current) clearTimeout(pressTimer.current); 
+          }
       }
+
       if (!isDragging && !isPanning) return;
+      
       if (isPanning) {
         const dx = clientX - panStart.current.x;
         const dy = clientY - panStart.current.y;
-        const finalX = currentPageId === 'home' ? panOffsetStart.current.x : panOffsetStart.current.x + dx;
+        const finalX = currentPageId === 'home' ? viewOffset.x : panOffsetStart.current.x + dx;
         setViewOffset({ x: finalX, y: panOffsetStart.current.y + dy });
         return;
       }
-      const x = clientX - mouseOffset.current.x; const y = clientY - mouseOffset.current.y;
+
+      const x = clientX - mouseOffset.current.x; 
+      const y = clientY - mouseOffset.current.y;
       setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x, y } : i));
       
       const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
       const best = ghosts[0] as any;
       
       if (best && best.dotDistance < SNAP_TOLERANCE) {
-          if (!tetherTimer.current && !activeTether) {
-              tetherTimer.current = setTimeout(() => { if(best) { setActiveTether({ ...best }); } }, TETHER_DELAY);
-          }
-      } else { 
-        if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; }
-        if (activeTether) setActiveTether(null);
+        setActiveTether({ ...best });
+      } else if (activeTether) {
+        // Sticky Latch: Require further distance to detach
+        if (!best || best.dotDistance > SNAP_TOLERANCE * 1.5) {
+          setActiveTether(null);
+        }
       }
     };
+
     const handleUp = (e: MouseEvent | TouchEvent) => {
-      setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
-      if (isPanning) { setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); setIsPanning(false); return; }
-      if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; }
+      setDragStartPos(null); 
+      if (pressTimer.current) clearTimeout(pressTimer.current);
+      
+      if (isPanning) { 
+        setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); 
+        setIsPanning(false); 
+        return; 
+      }
+
       if (!isDragging) return; 
       
       setCanvasItems(prev => {
@@ -366,6 +402,7 @@ export default function App() {
         }
         return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
       });
+
       if (activeTether) { 
         setConnections(prev => {
           const exists = prev.find(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide);
@@ -375,6 +412,7 @@ export default function App() {
       } 
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
     };
+
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
@@ -396,17 +434,24 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
-                          const c = conn.color.includes('emerald') ? '#10B981' : conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('amber') ? '#FBBF24' : conn.color.includes('blue') ? '#3B82F6' : '#D946EF';
+                          
+                          let strokeColor = '#3B82F6'; // Default Blue
+                          if (conn.color.includes('emerald')) strokeColor = '#10B981';
+                          else if (conn.color.includes('rose')) strokeColor = '#F43F5E';
+                          else if (conn.color.includes('amber')) strokeColor = '#FBBF24';
+                          else if (conn.color.includes('fuchsia')) strokeColor = '#D946EF';
+                          else if (conn.color.includes('blue')) strokeColor = '#3B82F6';
+
                           return (
                             <React.Fragment key={conn.id}>
-                              <path d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" />
+                              <path d={pathData.d} stroke={strokeColor} strokeWidth="3" fill="none" strokeLinecap="round" />
                               <circle 
                                 cx={pathData.mid.x} cy={pathData.mid.y} r="8" 
-                                fill="white" stroke={c} strokeWidth="2" 
+                                fill="white" stroke={strokeColor} strokeWidth="2" 
                                 className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform shadow-sm" 
                                 onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }}
                               />
-                              <X x={pathData.mid.x - 3} y={pathData.mid.y - 3} size={6} stroke={c} strokeWidth={3} className="pointer-events-none" />
+                              <X x={pathData.mid.x - 3} y={pathData.mid.y - 3} size={6} stroke={strokeColor} strokeWidth={3} className="pointer-events-none" />
                             </React.Fragment>
                           );
                       })}
@@ -416,8 +461,14 @@ export default function App() {
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
-                          const c = activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('amber') ? '#FBBF24' : activeTether.color.includes('blue') ? '#3B82F6' : '#D946EF';
-                          return <path d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeDasharray="6,4" className="opacity-50" />;
+                          
+                          let strokeColor = '#3B82F6';
+                          if (activeTether.color.includes('emerald')) strokeColor = '#10B981';
+                          else if (activeTether.color.includes('rose')) strokeColor = '#F43F5E';
+                          else if (activeTether.color.includes('amber')) strokeColor = '#FBBF24';
+                          else if (activeTether.color.includes('fuchsia')) strokeColor = '#D946EF';
+
+                          return <path d={pathData.d} stroke={strokeColor} strokeWidth="3" fill="none" strokeDasharray="6,4" className="opacity-50" />;
                       })()}
                   </svg>
                   {canvasItems.map(item => {
@@ -432,14 +483,15 @@ export default function App() {
                         <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />
                         
                         {LATCH_POINTS.map(lp => {
-                          const connected = connections.find(c => (c.sourceId === item.instanceId && c.sourceSide === lp.id) || (c.targetId === item.instanceId && c.targetSide === lp.id));
+                          const connectedAsSource = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
+                          const connectedAsTarget = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           const tethered = activeTether && ((activeTether.sourceId === item.instanceId && activeTether.sourceSide === lp.id) || (activeTether.targetId === item.instanceId && activeTether.targetSide === lp.id));
                           
                           let dotColor = 'bg-slate-200';
                           let glowClass = '';
                           let opacityClass = 'opacity-0 scale-50';
 
-                          if (connected) {
+                          if (connectedAsSource || connectedAsTarget || tethered) {
                             opacityClass = 'opacity-100 scale-100';
                             if (lp.id === 'bottom') { dotColor = 'bg-emerald-500'; glowClass = 'shadow-[0_0_10px_rgba(16,185,129,0.8)]'; }
                             else if (lp.id === 'right') { dotColor = 'bg-rose-500'; glowClass = 'shadow-[0_0_10px_rgba(244,63,94,0.8)]'; }
@@ -449,10 +501,10 @@ export default function App() {
                               dotColor = isFuchsia ? 'bg-fuchsia-500' : 'bg-blue-500'; 
                               glowClass = isFuchsia ? 'shadow-[0_0_10px_rgba(217,70,239,0.8)]' : 'shadow-[0_0_10px_rgba(59,130,246,0.8)]';
                             }
-                          } else if (tethered) {
-                            opacityClass = 'opacity-100 scale-125';
-                            dotColor = activeTether.color;
-                            glowClass = 'animate-pulse';
+                            if (tethered) {
+                              opacityClass = 'opacity-100 scale-125';
+                              glowClass += ' animate-pulse';
+                            }
                           } else if (isNearby || (isDragging && draggingId === item.instanceId)) {
                             opacityClass = 'opacity-40 scale-100';
                           }

@@ -3,9 +3,9 @@ import { LatchPoint } from './types';
 
 export const GRID_SIZE = 32;
 export const UNIT_SIZE_VAL = 32; 
-export const SNAP_TOLERANCE = 16; // 0.5 Cell Block for snap
-export const DETECTION_RANGE = 96; // 3 Cell Blocks for port visibility
-export const TETHER_DELAY = 80; 
+export const SNAP_TOLERANCE = 24; // Increased for more aggressive magnetism
+export const DETECTION_RANGE = 128; // 4 Cell Blocks for proactive port visibility
+export const TETHER_DELAY = 0; // Instant handshake confirmation
 export const HEADER_OFFSET = 56;
 export const ICON_SIZE = 24; 
 export const LONG_PRESS_MS = 150; 
