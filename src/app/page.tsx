@@ -126,10 +126,6 @@ export default function App() {
     return contexts.get(nodeId) || null;
   };
 
-  const isNodeInTree = (nodeId: string): boolean => {
-    return !!getTreeContext(nodeId, connRef.current);
-  };
-
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
     const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
@@ -152,7 +148,7 @@ export default function App() {
       LATCH_POINTS.forEach(lSource => {
         const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
 
-        // 1. Drag Node is Source -> Other is Target (Targeting Top/Blue)
+        // 1. Drag Node is Source -> Other is Target (Standard Loom Flow)
         const sPos = getPortPos(dragNode, lSource.id);
         const tPos = getPortPos(other, lTarget.id);
         const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
@@ -161,16 +157,16 @@ export default function App() {
           let color = lSource.color.replace('bg-', '');
           let valid = false;
 
-          // Isolated Input Logic: Floating Source -> Tree Target (Blue Input)
+          // Isolated Input Logic: Floating Source -> Tree Target (Top/Blue Port)
           if (!dragCtx && otherCtx && lTarget.id === 'top') {
             valid = true;
             color = 'fuchsia-500';
           }
-          // Standard Flow: Source in Tree -> Target (Standard attachment)
+          // Standard Execution Tree Flow
           else if (dragCtx && !otherCtx && lSource.id !== 'top') {
              valid = true;
           }
-          // Recursion: Descendant (Green/Red) -> Ancestor (Blue Input)
+          // Recursion: Descendant (Green/Red) -> Ancestor (Top/Blue)
           else if (dragCtx && otherCtx && dragCtx === otherCtx) {
             if (isAncestor(other.instanceId, dId, connRef.current)) {
               if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') {
@@ -185,7 +181,7 @@ export default function App() {
           }
         }
 
-        // 2. Other is Source -> Drag Node is Target (Dragging onto Top/Blue)
+        // 2. Other is Source -> Drag Node is Target (Dragging onto Top Input)
         const sPosInv = getPortPos(other, lSource.id);
         const tPosInv = getPortPos(dragNode, lTarget.id);
         const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
@@ -235,27 +231,36 @@ export default function App() {
       occupied.add(`${origin.x},${origin.y}`);
       
       const processNode = (nodeId: string, cx: number, cy: number) => {
-        const children = connections.filter(c => c.sourceId === nodeId);
-        children.forEach(conn => {
+        const outgoing = connections.filter(c => c.sourceId === nodeId);
+        const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
+        
+        // Place Fuchsia Providers exactly one cell block above the target
+        incomingFuchsia.forEach(conn => {
+            if (visited.has(conn.sourceId)) return;
+            const fx = cx;
+            const fy = cy - (GRID_SIZE * 2); // 32px cell + 32px gap
+            const source = newItems.find(i => i.instanceId === conn.sourceId);
+            if (source) {
+                source.x = fx; source.y = fy;
+                visited.add(source.instanceId); occupied.add(`${fx},${fy}`);
+            }
+        });
+
+        outgoing.forEach(conn => {
           if (visited.has(conn.targetId)) return;
+          if (conn.color.includes('fuchsia')) return; // Fuchsia is handled by target
+
           let found = false, safety = 0, searchDist = GRID_SIZE + minGap, tx = cx, ty = cy;
           
-          if (conn.color.includes('fuchsia')) {
-            // Fuchsia providers sit exactly one block above
-            tx = cx;
-            ty = cy - (GRID_SIZE * 2); 
-            found = true;
-          } else {
-            while (!found && safety < 15) {
-              let nextX = cx, nextY = cy;
-              if (conn.sourceSide === 'bottom') nextY += searchDist;
-              else if (conn.sourceSide === 'right') nextX += searchDist;
-              else if (conn.sourceSide === 'left') nextX -= searchDist;
-              else if (conn.sourceSide === 'top') nextY -= searchDist;
-              
-              if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += GRID_SIZE; }
-              safety++;
-            }
+          while (!found && safety < 15) {
+            let nextX = cx, nextY = cy;
+            if (conn.sourceSide === 'bottom') nextY += searchDist;
+            else if (conn.sourceSide === 'right') nextX += searchDist;
+            else if (conn.sourceSide === 'left') nextX -= searchDist;
+            else if (conn.sourceSide === 'top') nextY -= searchDist;
+            
+            if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += GRID_SIZE; }
+            safety++;
           }
           
           const target = newItems.find(i => i.instanceId === conn.targetId);
@@ -347,6 +352,7 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
+        // Sticky logic: don't break until significantly further away
         if (!best || best.dotDistance > SNAP_TOLERANCE * 1.5) {
           setActiveTether(null);
         }
@@ -410,7 +416,7 @@ export default function App() {
         <div className="w-full h-full relative overflow-hidden bg-white" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
           <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `32px 32px`, backgroundPosition: `${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px` }} />
 
-          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className={`w-full h-full relative ${isDragging ? '' : 'transition-transform duration-300'}`}>
+          <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className={`w-full h-full relative ${(isDragging || isPanning) ? '' : 'transition-transform duration-300'}`}>
               {currentPageId === 'studio' ? (
                 <>
                   <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-visible">
