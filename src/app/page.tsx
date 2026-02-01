@@ -263,13 +263,13 @@ export default function App() {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
                 
-                // Identify if this is a standard "blue" execution flow
-                const isBlue = !conn.color.includes('emerald') && !conn.color.includes('rose') && !conn.color.includes('amber') && !conn.color.includes('fuchsia');
+                // Identify if this is an execution flow (Blue, Emerald, or Rose)
+                // These must "unsnap" in grid mode to ensure lines (recursion or input) are visible.
+                const isExecution = !conn.color.includes('amber');
                 
-                // For Blue connections in Grid Mode: Always enforce a one-cell block in between (64px total center-to-center)
-                let step = (mode === 'grid' && conn.sourceSide !== 'bottom') ? GRID_SIZE : GRID_SIZE * 2;
-                if (mode === 'grid' && conn.sourceSide === 'bottom') {
-                  step = isBlue ? GRID_SIZE * 2 : GRID_SIZE;
+                let step = (mode === 'grid') ? GRID_SIZE : GRID_SIZE * 2;
+                if (mode === 'grid' && conn.sourceSide === 'bottom' && isExecution) {
+                    step = GRID_SIZE * 2; // Enforce visibility stride
                 }
 
                 if (conn.sourceSide === 'bottom') ty += step;
