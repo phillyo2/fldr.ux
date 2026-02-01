@@ -109,7 +109,18 @@ export default function App() {
       const visited = new Set<string>();
       const occupied = new Set<string>();
       
-      const step = mode === 'grid' ? 32 : 96;
+      const step = mode === 'grid' ? 32 : 64; // Tether uses 64 as base step for 1-block gap
+
+      const isPositionOccupied = (x: number, y: number) => {
+        if (mode === 'grid') return occupied.has(`${x},${y}`);
+        // In tether mode, check immediate neighbors to ensure at least one cell block gap
+        for (let dx = -32; dx <= 32; dx += 32) {
+          for (let dy = -32; dy <= 32; dy += 32) {
+            if (occupied.has(`${x + dx},${y + dy}`)) return true;
+          }
+        }
+        return false;
+      };
 
       // Start origin
       visited.add(origin.instanceId);
@@ -126,7 +137,7 @@ export default function App() {
           let searchDist = step;
           let tx = cx, ty = cy;
 
-          // Multi-step search to prevent overlaps
+          // Multi-step search to prevent overlaps/adjacency
           while (!found && safety < 15) {
             let nextX = cx, nextY = cy;
             if (conn.sourceSide === 'bottom') nextY += searchDist;
@@ -134,7 +145,7 @@ export default function App() {
             else if (conn.sourceSide === 'left') nextX -= searchDist;
             else if (conn.sourceSide === 'top') nextY -= searchDist;
 
-            if (!occupied.has(`${nextX},${nextY}`)) {
+            if (!isPositionOccupied(nextX, nextY)) {
               tx = nextX; ty = nextY;
               found = true;
             } else {
@@ -171,9 +182,9 @@ export default function App() {
               
               let finalY = target.y - verticalOffset;
               
-              // Collision check for isolated input
+              // Collision check for isolated input respecting proximity in tether mode
               let safety = 0;
-              while (occupied.has(`${item.x},${finalY}`) && safety < 5) {
+              while (isPositionOccupied(item.x, finalY) && safety < 10) {
                 finalY -= 32;
                 safety++;
               }
@@ -536,7 +547,7 @@ export default function App() {
                         if (isAdjacent) return null;
 
                         const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
-                        const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
+                        const tX = t.targetSide === 'right' ? t.x + 32 : (activeTether.targetSide === 'left' ? t.x : t.x + 16), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : 
                                   activeTether.color.includes('emerald') ? '#10B981' : 
                                   activeTether.color.includes('blue') ? '#3B82F6' : 
