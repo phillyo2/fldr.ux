@@ -262,7 +262,6 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                // Identify recursion nodes: tiles that have a blue output line back to an ancestor.
                 const isPerformingRecursion = connections.some(c => 
                   c.sourceId === conn.targetId && 
                   !c.color.includes('emerald') && 
@@ -273,7 +272,6 @@ export default function App() {
                 );
 
                 let step = GRID_SIZE;
-                // Unsnap (64px stride) if we are in tether mode OR if this node is performing recursion.
                 if (mode === 'tether' || (mode === 'grid' && isPerformingRecursion)) {
                     step = GRID_SIZE * 2; 
                 }
@@ -449,7 +447,6 @@ export default function App() {
                           const isEmerald = conn.color.includes('emerald');
                           const isRose = conn.color.includes('rose');
                           
-                          // Persistent Lines: Emerald, Fuchsia, and Rose execution flows always show even when adjacent
                           const isPersistent = isFuchsia || isEmerald || isRose;
                           if (!isPersistent && dist < 48) return null;
 
@@ -501,25 +498,26 @@ export default function App() {
                           if (connectedAsSource || connectedAsTarget || tethered) {
                             opacityClass = 'opacity-100 scale-100';
 
-                            // Proximity-Based Dot Culling: Hide dot if snapped directly to its counterpart anchor
-                            // Recalibrated to 24px to catch adjacent-cell diagonals while excluding 64px recursive gaps
                             const connection = connectedAsSource || connectedAsTarget || (tethered ? activeTether : null);
                             if (connection) {
-                              const isSource = (connection.sourceId === item.instanceId && connection.sourceSide === lp.id);
-                              const otherId = isSource ? connection.targetId : connection.sourceId;
-                              const otherSide = isSource ? connection.targetSide : connection.sourceSide;
-                              const otherItem = canvasItems.find(i => i.instanceId === otherId);
-                              const otherLp = LATCH_POINTS.find(p => p.id === otherSide);
+                              const isTargetPort = (connection.targetId === item.instanceId && connection.targetSide === lp.id);
+                              
+                              if (isTargetPort) {
+                                const otherId = connection.sourceId;
+                                const otherSide = connection.sourceSide;
+                                const otherItem = canvasItems.find(i => i.instanceId === otherId);
+                                const otherLp = LATCH_POINTS.find(p => p.id === otherSide);
 
-                              if (otherItem && otherLp) {
-                                const myX = item.x + lp.x * 32;
-                                const myY = item.y + lp.y * 32;
-                                const itsX = otherItem.x + otherLp.x * 32;
-                                const itsY = otherItem.y + otherLp.y * 32;
-                                const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
+                                if (otherItem && otherLp) {
+                                  const myX = item.x + lp.x * 32;
+                                  const myY = item.y + lp.y * 32;
+                                  const itsX = otherItem.x + otherLp.x * 32;
+                                  const itsY = otherItem.y + otherLp.y * 32;
+                                  const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
 
-                                if (dist < 24) {
-                                  opacityClass = 'opacity-0 scale-50';
+                                  if (dist < 24) {
+                                    opacityClass = 'opacity-0 scale-50';
+                                  }
                                 }
                               }
                             }
@@ -552,7 +550,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* Discrete Grid-Snapped Action Tiles - Fixed 28px Offset */}
       <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <LayoutGrid size={20} className="text-slate-600" />
       </div>
