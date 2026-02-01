@@ -93,8 +93,7 @@ export default function App() {
       if (curr === ancId) return true;
       if (visited.has(curr)) break;
       visited.add(curr);
-      // Only follow standard flow or subtree connections for ancestry
-      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('indigo'));
+      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('fuchsia'));
       if (!incoming) break;
       curr = incoming.sourceId;
     }
@@ -102,7 +101,7 @@ export default function App() {
   };
 
   const isExtraInput = (id: string): boolean => {
-    return connRef.current.some(c => c.sourceId === id && c.color.includes('indigo'));
+    return connRef.current.some(c => c.sourceId === id && c.color.includes('fuchsia'));
   };
 
   const getTreeId = (id: string): string | null => {
@@ -112,17 +111,12 @@ export default function App() {
     while (curr && safety < 100) {
       if (visited.has(curr)) return null;
       visited.add(curr);
-      
       const node = itemsRef.current.find(i => i.instanceId === curr);
       if (!node) return null;
       if (node.isOrigin) return 'MAIN';
-
-      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('indigo'));
+      const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('fuchsia'));
       if (!incoming) return null;
-
-      // Subtree roots are identified by Amber (left) entry
       if (incoming.sourceSide === 'left') return curr;
-
       curr = incoming.sourceId;
       safety++;
     }
@@ -133,16 +127,14 @@ export default function App() {
     const main = new Set<string>();
     const origin = canvasItems.find(i => i.isOrigin);
     if (!origin) return main;
-    
     const queue = [origin.instanceId];
     main.add(origin.instanceId);
-    
     let safety = 0;
     while(queue.length > 0 && safety < 1000) {
       const currId = queue.shift()!;
       const outgoing = connections.filter(c => c.sourceId === currId && 
         (c.sourceSide === 'bottom' || c.sourceSide === 'right') &&
-        !c.color.includes('indigo')
+        !c.color.includes('fuchsia')
       );
       outgoing.forEach(conn => {
         if (!main.has(conn.targetId)) {
@@ -161,19 +153,15 @@ export default function App() {
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
 
-    // Extra Inputs are isolated and cannot have children
     if (isExtraInput(dId)) return [];
 
     const dragTreeId = getTreeId(dId);
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
-      
-      // Cannot attach anything to an Extra Input tile
       if (isExtraInput(other.instanceId)) return;
 
       const otherTreeId = getTreeId(other.instanceId);
-
       const dx = (dragNode.x || 0) - other.x;
       const dy = (dragNode.y || 0) - other.y;
       const adx = Math.abs(dx);
@@ -182,40 +170,30 @@ export default function App() {
       const isSameTree = (dragTreeId !== null && otherTreeId !== null && dragTreeId === otherTreeId);
       const isUnattachedToCanvas = (otherTreeId !== null && dragTreeId === null);
 
-      // Case 1: Standard Isolation Logic
       if (isSameTree || isUnattachedToCanvas) {
-          // Success (Emerald): Below target
           if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', displayColor: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
           } 
-          // Error (Rose): Right of target
           else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
           } 
-          // Subtree (Amber): Left of target
           else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
           }
       }
 
-      // Case 2: Recursion / Go-To (Dragging descendant to ancestor)
       if (isSameTree && isAncestor(other.instanceId, dId)) {
-          // Go-To Emerald
           if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
              ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
           }
-          // Go-To Rose
           else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
              ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'right', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
           }
       }
 
-      // Case 3: Extra Inputs (Unattached node -> Any canvas node)
-      // This allows triggers or data providers to be "plugged in" as side-inputs
       if (isUnattachedToCanvas && dragTreeId === null) {
-          // If dragging above any node, it can be an extra input
           if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-indigo-500', displayColor: 'bg-indigo-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
+            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', displayColor: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
           }
       }
     });
@@ -402,35 +380,29 @@ export default function App() {
                     {connections.map(conn => {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
-
                         const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
                         if (isAdjacent) return null;
-
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                        
                         const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                         const c = conn.color.includes('rose') ? '#F43F5E' : 
                                   conn.color.includes('emerald') ? '#10B981' : 
                                   conn.color.includes('blue') ? '#3B82F6' : 
-                                  conn.color.includes('indigo') ? '#6366F1' : '#FBBF24';
+                                  conn.color.includes('fuchsia') ? '#D946EF' : '#FBBF24';
                         return <path key={conn.id} d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" className="drop-shadow-sm" />;
                     })}
                     
                     {activeTether && (() => {
                         const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === activeTether.targetId);
                         if (!s || !t) return null;
-                        
                         const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
                         if (isAdjacent) return null;
-
                         const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : 
                                   activeTether.color.includes('emerald') ? '#10B981' : 
                                   activeTether.color.includes('blue') ? '#3B82F6' : 
-                                  activeTether.color.includes('indigo') ? '#6366F1' : '#FBBF24';
-                        
+                                  activeTether.color.includes('fuchsia') ? '#D946EF' : '#FBBF24';
                         const tetherPath = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
                         return <path d={tetherPath.d} stroke={c} strokeWidth="3" fill="none" strokeDasharray="5,5" className="animate-pulse" />;
                     })()}
@@ -443,7 +415,7 @@ export default function App() {
                     <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border transition-all 
                       ${item.isOrigin ? 'border-blue-400 ring-1 ring-blue-50 shadow-blue-100' : (item.isRegistered ? 'border-slate-200 shadow-slate-100' : 'border-emerald-300 ring-1 ring-emerald-50 shadow-emerald-50')}
                       ${mainNodes.has(item.instanceId) ? 'shadow-emerald-200 ring-1 ring-emerald-100' : ''}
-                      ${isExtraInput(item.instanceId) ? 'border-indigo-400 ring-1 ring-indigo-50 shadow-indigo-100' : ''}
+                      ${isExtraInput(item.instanceId) ? 'border-fuchsia-400 ring-1 ring-fuchsia-50 shadow-fuchsia-100' : ''}
                     `}>
                       <SafeIcon name={item.icon} size={16} className={item.isRegistered ? (mainNodes.has(item.instanceId) ? 'text-slate-800' : 'text-slate-400') : 'text-emerald-500'} />
                     </div>
@@ -456,15 +428,13 @@ export default function App() {
                     if(!s || !t) return null;
                     const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
                     if (isAdjacent) return null;
-
                     const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                    
                     const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                     const c = conn.color.includes('rose') ? 'bg-rose-500' : 
                                conn.color.includes('emerald') ? 'bg-emerald-500' : 
                                conn.color.includes('blue') ? 'bg-blue-500' : 
-                               conn.color.includes('indigo') ? 'bg-indigo-500' : 'bg-amber-400';
+                               conn.color.includes('fuchsia') ? 'bg-fuchsia-500' : 'bg-amber-400';
                     return (
                         <div 
                           key={`ball_${conn.id}`} 
@@ -489,7 +459,6 @@ export default function App() {
                           const isGuidance = !!ghost || activeTether?.targetId === item.instanceId;
                           const isVisible = isGuidance || isConnected;
                           const c = lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300';
-
                           return (
                             <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2000]
                                     ${isConnected ? c : 'bg-slate-300'}
@@ -502,7 +471,7 @@ export default function App() {
                     </div>
                 ))}
 
-                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow, Indigo) */}
+                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow, Fuchsia) */}
                 {canvasItems.map(item => (
                     <div key={`latch_parents_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1002]' : 'z-21'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type !== 'input').map(lp => {
@@ -512,11 +481,9 @@ export default function App() {
                           const isConnected = !!outgoingLink || !!incomingLink;
                           const isGuidance = !!ghost || activeTether?.sourceId === item.instanceId;
                           const isVisible = isGuidance || isConnected;
-                          
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : 
                                     lp.color.includes('emerald') ? 'bg-emerald-500' : 
-                                    lp.color.includes('indigo') ? 'bg-indigo-500' : 'bg-amber-400';
-
+                                    lp.color.includes('fuchsia') ? 'bg-fuchsia-500' : 'bg-amber-400';
                           return (
                             <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2001]
                                     ${isConnected ? c : 'bg-slate-300'}
