@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -11,7 +12,7 @@ import {
   HEADER_OFFSET, SNAP_TOLERANCE, DETECTION_RANGE, 
   DRAG_THRESHOLD, LONG_PRESS_MS, LATCH_POINTS, GRID_SIZE 
 } from '@/lib/constants';
-import { getSmartPath, snapToGrid } from '@/lib/pathing';
+import { getSmartPath, snapToGrid, isAncestor } from '@/lib/pathing';
 
 export default function App() {
   // --- STATE ---
@@ -107,19 +108,6 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
-  const isAncestor = (potentialAncestorId: string, potentialDescendantId: string, conns: Connection[]) => {
-    const visited = new Set<string>();
-    const stack = [potentialAncestorId];
-    while (stack.length > 0) {
-      const node = stack.pop()!;
-      if (node === potentialDescendantId) return true;
-      if (visited.has(node)) continue;
-      visited.add(node);
-      conns.filter(c => c.sourceId === node && !c.color.includes('fuchsia')).forEach(c => stack.push(c.targetId));
-    }
-    return false;
-  };
-
   const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
     const contexts = new Map<string, string>();
     const visited = new Set<string>();
@@ -131,7 +119,7 @@ export default function App() {
       if (visited.has(id)) continue;
       visited.add(id);
 
-      const outgoing = currentConnections.filter(c => c.sourceId === id && !c.color.includes('fuchsia'));
+      const outgoing = currentConnections.filter(c => c.sourceId === id);
       for (const conn of outgoing) {
         const nextContext = conn.sourceSide === 'left' ? `sub_${conn.targetId}` : context;
         contexts.set(conn.targetId, nextContext);
@@ -146,9 +134,6 @@ export default function App() {
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
 
-    const isDragFuchsiaProvider = connRef.current.some(c => c.sourceId === dId && c.color.includes('fuchsia'));
-    if (isDragFuchsiaProvider) return [];
-    
     const dragCtx = getTreeContext(dId, connRef.current);
 
     const getPortPos = (item: any, side: string) => {
@@ -162,8 +147,6 @@ export default function App() {
     items.forEach(other => {
       if (other.instanceId === dId) return;
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
-      const isOtherFuchsiaProvider = connRef.current.some(c => c.sourceId === other.instanceId && c.color.includes('fuchsia'));
-      if (isOtherFuchsiaProvider) return;
       
       LATCH_POINTS.forEach(lSource => {
         const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
@@ -216,7 +199,6 @@ export default function App() {
         const occupied = new Set<string>();
 
         const isPositionOccupied = (x: number, y: number) => {
-            // Fuzzy match for snap positions to avoid overlaps
             const key = `${Math.round(x)},${Math.round(y)}`;
             return occupied.has(key);
         };
@@ -252,46 +234,22 @@ export default function App() {
         const roots = newItems.filter(i => {
             if (visited.has(i.instanceId)) return false;
             if (i.isOrigin) return true;
-            // Fuchsia sources with no incoming standard flow are treated as roots
-            const hasIncomingStandard = connections.some(c => c.targetId === i.instanceId && !c.color.includes('fuchsia'));
-            return !hasIncomingStandard;
+            const hasIncoming = connections.some(c => c.targetId === i.instanceId);
+            return !hasIncoming;
         });
 
         const processNode = (nodeId: string, cx: number, cy: number) => {
-            // Process specialized fuchsia connections (inputs to this node)
-            const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
-            incomingFuchsia.forEach(conn => {
-                if (visited.has(conn.sourceId)) return;
-                const fx = cx;
-                const fy = cy - GRID_SIZE;
-                const { tx: finalX, ty: finalY } = findSafePosition(fx, fy, 0, -GRID_SIZE);
-                const source = newItems.find(i => i.instanceId === conn.sourceId);
-                if (source) {
-                    source.x = finalX; source.y = finalY;
-                    visited.add(source.instanceId); markOccupied(finalX, finalY);
-                    processNode(source.instanceId, finalX, finalY);
-                }
-            });
-
-            // Process standard outgoing flow
-            const outgoing = connections.filter(c => c.sourceId === nodeId && !c.color.includes('fuchsia'));
+            const outgoing = connections.filter(c => c.sourceId === nodeId);
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                // Targeted Recursion Unsnap: Check if the target node itself initiates a blue recursion loop
-                const isPerformingRecursion = connections.some(c => 
-                    c.sourceId === conn.targetId && 
-                    !c.color.includes('emerald') && !c.color.includes('rose') && !c.color.includes('amber') && !c.color.includes('fuchsia') &&
-                    isAncestor(c.targetId, conn.targetId, connections)
-                );
+                const isPerformingRecursion = isAncestor(conn.targetId, conn.sourceId, connections);
 
                 let step = GRID_SIZE;
-                // If it's a grid view and it's a recursive node, we break from parent by 1 cell block (64px stride)
                 if (mode === 'grid' && isPerformingRecursion) {
                     step = GRID_SIZE * 2; 
                 } else if (mode === 'tether') {
-                    // Tether mode uses a more relaxed spacing
-                    step = GRID_SIZE * 3;
+                    step = GRID_SIZE * 1.5;
                 }
 
                 let tx = cx, ty = cy;
@@ -320,7 +278,7 @@ export default function App() {
             root.x = tx; root.y = ty;
             visited.add(root.instanceId); markOccupied(tx, ty);
             processNode(root.instanceId, tx, ty);
-            islandOffsetY += 192;
+            islandOffsetY += 96;
         });
 
         const origin = newItems.find(i => i.isOrigin);
@@ -544,7 +502,7 @@ export default function App() {
                                   const itsY = otherItem.y + otherLp.y * 32;
                                   const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
 
-                                  // Culling Logic: Hide blue input dot if snapped (within 24px), but Fuchsia is exempt.
+                                  // Culling Logic: Hide input dot if snapped, but Fuchsia is exempt.
                                   if (dist < 24 && !isFuchsia) {
                                     opacityClass = 'opacity-0 scale-50';
                                   }
@@ -563,7 +521,7 @@ export default function App() {
                                   const itsY = otherItem.y + otherLp.y * 32;
                                   const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
 
-                                  const hasIncomingFlow = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && !c.color.includes('fuchsia'));
+                                  const hasIncomingFlow = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top');
                                   const isIsolatedInput = item.isOrigin || !hasIncomingFlow;
 
                                   // If snapped and it's an isolated input (Origin/Trigger), hide the source (Green) dot too

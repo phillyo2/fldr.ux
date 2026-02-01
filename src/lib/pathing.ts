@@ -26,7 +26,7 @@ interface AStarNode extends Point {
   direction: Point | null;
 }
 
-const isAncestor = (potentialAncestorId: string, potentialDescendantId: string, conns: Connection[]) => {
+export const isAncestor = (potentialAncestorId: string, potentialDescendantId: string, conns: Connection[]) => {
   const visited = new Set<string>();
   const stack = [potentialAncestorId];
   while (stack.length > 0) {
@@ -34,7 +34,7 @@ const isAncestor = (potentialAncestorId: string, potentialDescendantId: string, 
     if (node === potentialDescendantId) return true;
     if (visited.has(node)) continue;
     visited.add(node);
-    conns.filter(c => c.sourceId === node && !c.color.includes('fuchsia')).forEach(c => stack.push(c.targetId));
+    conns.filter(c => c.sourceId === node).forEach(c => stack.push(c.targetId));
   }
   return false;
 };
