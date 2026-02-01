@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
@@ -104,7 +104,7 @@ export default function App() {
       if (current === nodeId) return true;
       if (visited.has(current)) continue;
       visited.add(current);
-      // Execution tree ignores Fuchsia isolated inputs
+      // Fuchsia inputs are isolated data providers, not flow consumers
       const outgoing = connections.filter(c => c.sourceId === current && !c.color.includes('fuchsia'));
       outgoing.forEach(c => stack.push(c.targetId));
     }
@@ -139,7 +139,7 @@ export default function App() {
           let found = false, safety = 0, searchDist = GRID_SIZE + minGap, tx = cx, ty = cy;
           
           if (conn.color.includes('fuchsia')) {
-            // Isolated Inputs handled after tree nodes
+            // Isolated Inputs positioned later
           } else {
             while (!found && safety < 15) {
               let nextX = cx, nextY = cy;
@@ -172,7 +172,6 @@ export default function App() {
   };
 
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
-    if (activeTether) return []; 
     const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
@@ -183,49 +182,90 @@ export default function App() {
       if (other.instanceId === dId) return;
       const otherInTree = isNodeInTree(other.instanceId);
       
-      const dx = dragNode.x - other.x;
-      const dy = dragNode.y - other.y;
-      const adx = Math.abs(dx);
-      const ady = Math.abs(dy);
+      // We only handshake between a tree node and a non-tree node (standard entry)
+      // Or a tree node and a floating node above (isolated input)
+      // Or tree to tree (looping - blue)
 
-      // --- CASE 1: DragNode is Target (User drags a node to attach it to the tree) ---
-      if (!dragInTree && otherInTree) {
-          // Check standard outputs of 'other' (In Tree) -> DragNode Top
-          // Success (Bottom)
-          if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', snapX: other.x, snapY: other.y + GRID_SIZE, dotDistance: Math.sqrt(adx**2 + (dy-GRID_SIZE)**2) } as any);
-          }
-          // Error (Right)
-          else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', snapX: other.x + GRID_SIZE, snapY: other.y, dotDistance: Math.sqrt((dx-GRID_SIZE)**2 + ady**2) } as any);
-          }
-          // Parallel (Left)
-          else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', snapX: other.x - GRID_SIZE, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-GRID_SIZE)**2 + ady**2) } as any);
-          }
-      }
+      const dX = dragNode.x + 16;
+      const dY = dragNode.y + 16;
+      const oX = other.x + 16;
+      const oY = other.y + 16;
 
-      // --- CASE 2: DragNode is Source (User drags a node ABOVE a tree node to create isolated input) ---
-      if (!dragInTree && otherInTree) {
-         // Check DragNode exits -> Other Top (Becomes Fuchsia)
-         // Only Bottom Exit for Isolated Inputs for simplicity
-         if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - GRID_SIZE, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-GRID_SIZE)**2) } as any);
-         }
-      }
-      
-      // --- CASE 3: Recursion (Tree Node to Tree Node) ---
-      if (dragInTree && otherInTree) {
-         // Logic to identify loops and show blue line
-         if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-blue-500', snapX: other.x, snapY: other.y + GRID_SIZE, dotDistance: Math.sqrt(adx**2 + (dy-GRID_SIZE)**2) } as any);
-         }
-      }
+      const getPortPos = (item: any, side: string) => {
+        if (side === 'top') return { x: item.x + 16, y: item.y };
+        if (side === 'bottom') return { x: item.x + 16, y: item.y + 32 };
+        if (side === 'right') return { x: item.x + 32, y: item.y + 16 };
+        if (side === 'left') return { x: item.x, y: item.y + 16 };
+        return { x: item.x + 16, y: item.y + 16 };
+      };
+
+      LATCH_POINTS.forEach(lSource => {
+        if (lSource.type === 'input') return; // Cannot be a source from an input port
+        
+        LATCH_POINTS.forEach(lTarget => {
+          if (lTarget.type !== 'input' && lTarget.type !== 'peek') return; // Must target an input or peek
+
+          // Logical Check:
+          // Case A: Dragging Floating Node -> Tree Node (Attach to tree)
+          // Case B: Tree Node -> Dragging Floating Node (Consume into tree)
+          // Case C: Floating Node above Tree Node -> Isolated Input (Fuchsia)
+
+          const sPos = getPortPos(dragNode, lSource.id);
+          const tPos = getPortPos(other, lTarget.id);
+
+          const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
+
+          if (dist < DETECTION_RANGE) {
+            let color = lSource.id === 'bottom' ? 'bg-emerald-500' : lSource.id === 'right' ? 'bg-rose-500' : 'bg-amber-400';
+            
+            // Isolated Input Logic: If DragNode is floating and sits above a tree node's top port
+            if (!dragInTree && otherInTree && lTarget.id === 'top' && dragNode.y < other.y) {
+               color = 'bg-fuchsia-500';
+            }
+            
+            // Recursion Logic: Tree to Tree
+            if (dragInTree && otherInTree) {
+               color = 'bg-blue-500';
+            }
+
+            ghosts.push({
+              id: 'ghost',
+              sourceId: dId,
+              sourceSide: lSource.id,
+              targetId: other.instanceId,
+              targetSide: lTarget.id,
+              color,
+              snapX: other.x, // Simplified snapping logic for grid
+              snapY: other.y,
+              dotDistance: dist
+            } as any);
+          }
+
+          // Inverse Check (Other as source)
+          const sPosInv = getPortPos(other, lSource.id);
+          const tPosInv = getPortPos(dragNode, lTarget.id);
+          const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
+
+          if (distInv < DETECTION_RANGE) {
+            let color = lSource.id === 'bottom' ? 'bg-emerald-500' : lSource.id === 'right' ? 'bg-rose-500' : 'bg-amber-400';
+            
+            ghosts.push({
+              id: 'ghost',
+              sourceId: other.instanceId,
+              sourceSide: lSource.id,
+              targetId: dId,
+              targetSide: lTarget.id,
+              color,
+              snapX: dragNode.x,
+              snapY: dragNode.y,
+              dotDistance: distInv
+            } as any);
+          }
+        });
+      });
     });
 
-    if (ghosts.length === 0) return [];
-    ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
-    return [ghosts[0]];
+    return ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
@@ -289,20 +329,17 @@ export default function App() {
       }
       const x = clientX - mouseOffset.current.x; const y = clientY - mouseOffset.current.y;
       setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x, y } : i));
+      
       const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
-      if (!activeTether) {
-          const best = ghosts[0] as any;
-          if (best && best.dotDistance < SNAP_TOLERANCE) {
-              if (!tetherTimer.current) {
-                  tetherTimer.current = setTimeout(() => { if(best) { setActiveTether({ ...best }); } }, TETHER_DELAY);
-              }
-          } else { if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; } }
-      } else {
-        const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
-        const best = ghosts[0] as any;
-        if (!best || best.dotDistance > SNAP_TOLERANCE) {
-          setActiveTether(null);
-        }
+      const best = ghosts[0] as any;
+      
+      if (best && best.dotDistance < SNAP_TOLERANCE) {
+          if (!tetherTimer.current && !activeTether) {
+              tetherTimer.current = setTimeout(() => { if(best) { setActiveTether({ ...best }); } }, TETHER_DELAY);
+          }
+      } else { 
+        if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; }
+        if (activeTether) setActiveTether(null);
       }
     };
     const handleUp = (e: MouseEvent | TouchEvent) => {
@@ -310,15 +347,39 @@ export default function App() {
       if (isPanning) { setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); setIsPanning(false); return; }
       if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; }
       if (!isDragging) return; 
+      
       setCanvasItems(prev => {
         const item = prev.find(i => i.instanceId === draggingId); if (!item) return prev;
         let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
-        const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x: item.x, y: item.y });
-        const best = ghosts[0] as any;
-        if (best && best.dotDistance < SNAP_TOLERANCE) { finalX = best.snapX!; finalY = best.snapY!; }
+        
+        if (activeTether) {
+          const target = prev.find(i => i.instanceId === activeTether.targetId);
+          const source = prev.find(i => i.instanceId === activeTether.sourceId);
+          if (target && source) {
+             // Snap logic: if we are dragging the source, snap it relative to target. 
+             // If dragging target, snap relative to source.
+             if (draggingId === activeTether.sourceId) {
+                if (activeTether.sourceSide === 'bottom' && activeTether.targetSide === 'top') { finalX = target.x; finalY = target.y - GRID_SIZE; }
+                else if (activeTether.sourceSide === 'right' && activeTether.targetSide === 'left') { finalX = target.x - GRID_SIZE; finalY = target.y; }
+                else if (activeTether.sourceSide === 'left' && activeTether.targetSide === 'right') { finalX = target.x + GRID_SIZE; finalY = target.y; }
+                else if (activeTether.sourceSide === 'top' && activeTether.targetSide === 'bottom') { finalX = target.x; finalY = target.y + GRID_SIZE; }
+             } else {
+                if (activeTether.targetSide === 'top' && activeTether.sourceSide === 'bottom') { finalX = source.x; finalY = source.y + GRID_SIZE; }
+                else if (activeTether.targetSide === 'left' && activeTether.sourceSide === 'right') { finalX = source.x + GRID_SIZE; finalY = source.y; }
+                else if (activeTether.targetSide === 'right' && activeTether.sourceSide === 'left') { finalX = source.x - GRID_SIZE; finalY = source.y; }
+                else if (activeTether.targetSide === 'bottom' && activeTether.sourceSide === 'top') { finalX = source.x; finalY = source.y - GRID_SIZE; }
+             }
+          }
+        }
         return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
       });
-      if (activeTether) { setConnections(prev => [...prev, { ...activeTether, id: `conn_${Date.now()}` }]); } 
+      if (activeTether) { 
+        setConnections(prev => {
+          const exists = prev.find(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide);
+          if (exists) return prev;
+          return [...prev, { ...activeTether, id: `conn_${Date.now()}` }];
+        }); 
+      } 
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
@@ -367,13 +428,17 @@ export default function App() {
                           const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === activeTether.targetId);
                           if(!s || !t) return null;
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
-                          const tX = activeTether.snapX!, tY = activeTether.snapY! - HEADER_OFFSET;
+                          const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
                           const c = activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('amber') ? '#FBBF24' : activeTether.color.includes('blue') ? '#3B82F6' : '#D946EF';
                           return <path d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeDasharray="6,4" className="opacity-50" />;
                       })()}
                   </svg>
-                  {canvasItems.map(item => (
+                  {canvasItems.map(item => {
+                    const draggingNode = draggingId ? canvasItems.find(i => i.instanceId === draggingId) : null;
+                    const isNearby = draggingNode ? Math.sqrt(Math.pow(item.x - draggingNode.x, 2) + Math.pow(item.y - draggingNode.y, 2)) < DETECTION_RANGE : false;
+
+                    return (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
                       className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32, transition: isDragging && draggingId === item.instanceId ? 'none' : '' }}>
                       {item.name === 'Circuit Breaker' && <div className="absolute inset-0 translate-x-1 translate-y-1 bg-slate-200 rounded-md -z-10 shadow-md" />}
@@ -382,9 +447,14 @@ export default function App() {
                         
                         {LATCH_POINTS.map(lp => {
                           const connected = connections.find(c => (c.sourceId === item.instanceId && c.sourceSide === lp.id) || (c.targetId === item.instanceId && c.targetSide === lp.id));
+                          const tethered = activeTether && ((activeTether.sourceId === item.instanceId && activeTether.sourceSide === lp.id) || (activeTether.targetId === item.instanceId && activeTether.targetSide === lp.id));
+                          
                           let dotColor = 'bg-slate-200';
                           let glowClass = '';
+                          let opacityClass = 'opacity-0 scale-50';
+
                           if (connected) {
+                            opacityClass = 'opacity-100 scale-100';
                             if (lp.id === 'bottom') { dotColor = 'bg-emerald-500'; glowClass = 'shadow-[0_0_10px_rgba(16,185,129,0.8)]'; }
                             else if (lp.id === 'right') { dotColor = 'bg-rose-500'; glowClass = 'shadow-[0_0_10px_rgba(244,63,94,0.8)]'; }
                             else if (lp.id === 'left') { dotColor = 'bg-amber-400'; glowClass = 'shadow-[0_0_10px_rgba(251,191,36,0.8)]'; }
@@ -393,15 +463,22 @@ export default function App() {
                               dotColor = isFuchsia ? 'bg-fuchsia-500' : 'bg-blue-500'; 
                               glowClass = isFuchsia ? 'shadow-[0_0_10px_rgba(217,70,239,0.8)]' : 'shadow-[0_0_10px_rgba(59,130,246,0.8)]';
                             }
+                          } else if (tethered) {
+                            opacityClass = 'opacity-100 scale-125';
+                            dotColor = activeTether.color;
+                            glowClass = 'animate-pulse';
+                          } else if (isNearby || (isDragging && draggingId === item.instanceId)) {
+                            opacityClass = 'opacity-40 scale-100';
                           }
                           
                           return (
-                            <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${glowClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8, height: 8 }} />
+                            <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${glowClass} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8, height: 8 }} />
                           );
                         })}
                       </div>
                     </div>
-                  ))}
+                  );
+                  })}
                 </>
               ) : (
                 <div className="p-12 max-w-5xl">
@@ -457,3 +534,4 @@ export default function App() {
     </div>
   );
 }
+
