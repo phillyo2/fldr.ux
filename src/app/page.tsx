@@ -86,7 +86,6 @@ export default function App() {
     const h = window.innerHeight;
     setWindowSize({ w, h });
     
-    // Sync: Entry point at 75% height, center X
     const centerX = snapToGrid(w / 2 - 16, 0);
     const startY = snapToGrid(h * 0.25 + HEADER_OFFSET, HEADER_OFFSET);
     
@@ -94,7 +93,6 @@ export default function App() {
       { instanceId: 'entry_origin', name: 'Entry Point', icon: 'Shield', x: centerX, y: startY, isRegistered: true, isOrigin: true }
     ]);
     
-    // Viewport jump
     const vx = - (centerX - (w / 2) + 16);
     const vy = - (startY - (h / 2) + 16);
     setViewOffset({ x: vx, y: vy });
@@ -431,6 +429,12 @@ export default function App() {
                           if(!s || !t) return null;
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
+                          
+                          // Spacing refinement: Hide standard adjacent lines to prevent clutter
+                          const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
+                          const isFuchsia = conn.color.includes('fuchsia');
+                          if (!isFuchsia && dist < 48) return null;
+
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                           let strokeColor = '#3B82F6'; 
                           if (conn.color.includes('emerald')) strokeColor = '#10B981';
@@ -504,24 +508,24 @@ export default function App() {
         </div>
       </main>
 
-      {/* Grid-Snapped Command Cluster (Top Right) */}
+      {/* Discrete Grid-Snapped Command Cluster (Top Right) */}
       <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-0">
          <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><LayoutGrid size={20} className="text-slate-600" /></div>
          <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Waypoints size={20} className="text-slate-600" /></div>
       </div>
 
-      {/* Grid-Snapped Zoom Cluster (Center Right) */}
+      {/* Discrete Grid-Snapped Zoom Cluster (Center Right) */}
       <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col gap-0">
          <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mb-0"><Plus size={20} className="text-slate-700" /></button>
          <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm mt-0"><Minus size={20} className="text-slate-700" /></button>
       </div>
 
-      {/* Grid-Snapped Toolbox Access (Bottom Left) */}
+      {/* Discrete Grid-Snapped Toolbox Access (Bottom Left) */}
       <div className="fixed bottom-8 left-8 z-[500]">
          <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800"><Folder size={20} className="text-white" /></div>
       </div>
       
-      {/* Grid-Snapped Navigator Access (Bottom Right) */}
+      {/* Discrete Grid-Snapped Navigator Access (Bottom Right) */}
       <div className="fixed bottom-8 right-8 z-[500]">
         <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700"><Compass size={20} className="text-white" /></div>
       </div>
