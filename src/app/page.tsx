@@ -263,18 +263,16 @@ export default function App() {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
                 
-                // TARGETED UNSNAP: Only unsnap if the target tile is actively performing recursion (pointing to an ancestor)
-                const targetNodeId = conn.targetId;
-                const isPerformingRecursion = connections.some(c => 
-                    c.sourceId === targetNodeId && 
-                    isAncestor(c.targetId, targetNodeId, connections)
-                );
+                // SIMPLIFIED UNSNAP: Tiles with blue lines attached detach from their parent.
+                // Any flow that isn't emerald, rose, amber, or fuchsia is treated as standard blue flow.
+                const isBlueLine = !conn.color.includes('emerald') && 
+                                  !conn.color.includes('rose') && 
+                                  !conn.color.includes('amber') &&
+                                  !conn.color.includes('fuchsia');
                 
                 let step = GRID_SIZE;
-                if (mode === 'tether') {
-                    step = GRID_SIZE * 2;
-                } else if (mode === 'grid' && isPerformingRecursion) {
-                    step = GRID_SIZE * 2; // Create breathing room specifically for recursion entry/exit
+                if (mode === 'tether' || (mode === 'grid' && isBlueLine)) {
+                    step = GRID_SIZE * 2; 
                 }
 
                 if (conn.sourceSide === 'bottom') ty += step;
