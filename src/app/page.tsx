@@ -146,6 +146,8 @@ export default function App() {
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
+      
+      // FIX: Define otherCtx before it is used in the condition
       const otherCtx = getTreeContext(other.instanceId, connRef.current);
 
       LATCH_POINTS.forEach(lSource => {
@@ -210,7 +212,7 @@ export default function App() {
         const findSafePosition = (startX: number, startY: number, stepX: number, stepY: number) => {
             let tx = startX, ty = startY;
             let safety = 0;
-            while (isPositionOccupied(tx, ty) && safety < 100) {
+            while (isPositionOccupied(tx, ty) && safety < 500) {
                 tx += stepX;
                 ty += stepY;
                 safety++;
@@ -265,22 +267,11 @@ export default function App() {
         islands.forEach((root) => {
             const startX = snapToGrid(windowSize.w / 2 - 160, 0);
             const startY = snapToGrid(windowSize.h * 0.4 + islandOffsetY, HEADER_OFFSET);
-            const { tx, ty } = findSafePosition(startX, startY, 0, GRID_SIZE);
+            const { tx, ty } = findSafePosition(startX, startY, 0, mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5);
             root.x = tx; root.y = ty;
             visited.add(root.instanceId); markOccupied(tx, ty);
             processNode(root.instanceId, tx, ty);
-            islandOffsetY += 64;
-        });
-
-        newItems.forEach(item => {
-            if (!visited.has(item.instanceId)) {
-                const startX = snapToGrid(windowSize.w / 2 - 160, 0);
-                const startY = snapToGrid(windowSize.h * 0.4 + islandOffsetY, HEADER_OFFSET);
-                const { tx, ty } = findSafePosition(startX, startY, 0, GRID_SIZE);
-                item.x = tx; item.y = ty;
-                visited.add(item.instanceId); markOccupied(tx, ty);
-                islandOffsetY += 48;
-            }
+            islandOffsetY += mode === 'grid' ? 64 : 48;
         });
 
         if (origin) {
