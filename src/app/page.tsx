@@ -171,17 +171,23 @@ export default function App() {
       const isUnattachedToCanvas = (otherTreeId !== null && dragTreeId === null);
 
       if (isSameTree || isUnattachedToCanvas) {
+          // Emerald (Success) -> Below
           if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', displayColor: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
           } 
+          // Rose (Error) -> Right
           else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
           } 
+          // Amber (Subtree) -> Left (ONLY FOR NEW TILES)
           else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-            ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+            if (dragTreeId === null) {
+              ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+            }
           }
       }
 
+      // Blue (Go-To Recursion)
       if (isSameTree && isAncestor(other.instanceId, dId)) {
           if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
              ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
@@ -191,6 +197,7 @@ export default function App() {
           }
       }
 
+      // Fuchsia (Extra Input / Data Provider) -> Above any tile
       if (isUnattachedToCanvas && dragTreeId === null) {
           if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', displayColor: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
@@ -302,7 +309,7 @@ export default function App() {
 
       if (!activeTether) {
           const best = ghosts[0] as any;
-          if (best && best.dotDistance < 24) {
+          if (best && best.dotDistance < SNAP_TOLERANCE) {
               if (!tetherTimer.current) {
                   tetherTimer.current = setTimeout(() => {
                       if(best) { setActiveTether({ ...best }); setGhostConnections([]); }
@@ -331,7 +338,7 @@ export default function App() {
         
         const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x: item.x, y: item.y });
         const best = ghosts[0] as any;
-        if (best && best.dotDistance < 24) { finalX = best.snapX!; finalY = best.snapY!; }
+        if (best && best.dotDistance < SNAP_TOLERANCE) { finalX = best.snapX!; finalY = best.snapY!; }
 
         const isOccupied = prev.some(other => other.instanceId !== draggingId && Math.abs(other.x - finalX) < 5 && Math.abs(other.y - finalY) < 5);
         if (isOccupied) return prev.map(i => i.instanceId === draggingId ? { ...i, x: lastValidPos.current.x, y: lastValidPos.current.y } : i);
@@ -380,8 +387,14 @@ export default function App() {
                     {connections.map(conn => {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
-                        const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
+                        
+                        // Fusion Logic: Only hide if adjacent to the specific port side
+                        const isAdjacent = (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                                           (conn.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                                           (conn.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y);
+
                         if (isAdjacent) return null;
+
                         const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                         const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
@@ -395,8 +408,13 @@ export default function App() {
                     {activeTether && (() => {
                         const s = canvasItems.find(i => i.instanceId === activeTether.sourceId), t = canvasItems.find(i => i.instanceId === activeTether.targetId);
                         if (!s || !t) return null;
-                        const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
+
+                        const isAdjacent = (activeTether.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                                           (activeTether.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                                           (activeTether.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y);
+
                         if (isAdjacent) return null;
+
                         const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : 
@@ -426,8 +444,13 @@ export default function App() {
                 {connections.map(conn => {
                     const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                     if(!s || !t) return null;
-                    const isAdjacent = Math.abs(s.x - t.x) < 35 && Math.abs(s.y - t.y) < 35;
+                    
+                    const isAdjacent = (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                                       (conn.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                                       (conn.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y);
+
                     if (isAdjacent) return null;
+
                     const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                     const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                     const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
@@ -455,9 +478,16 @@ export default function App() {
                           const ghost = ghostConnections.find(g => g.targetId === item.instanceId && g.targetSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                          const isConnected = !!outgoingLink || !!incomingLink;
+                          
+                          const s = incomingLink ? canvasItems.find(i => i.instanceId === incomingLink.sourceId) : null;
+                          const t = item;
+                          const isFused = s && ((incomingLink?.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                                               (incomingLink?.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                                               (incomingLink?.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y));
+
+                          const isConnected = !!incomingLink;
                           const isGuidance = !!ghost || activeTether?.targetId === item.instanceId;
-                          const isVisible = isGuidance || isConnected;
+                          const isVisible = (isGuidance || isConnected) && !isFused;
                           const c = lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300';
                           return (
                             <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2000]
@@ -477,10 +507,16 @@ export default function App() {
                         {LATCH_POINTS.filter(lp => lp.type !== 'input').map(lp => {
                           const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
-                          const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                          const isConnected = !!outgoingLink || !!incomingLink;
+                          
+                          const s = item;
+                          const t = outgoingLink ? canvasItems.find(i => i.instanceId === outgoingLink.targetId) : null;
+                          const isFused = t && ((outgoingLink?.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
+                                               (outgoingLink?.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
+                                               (outgoingLink?.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y));
+
+                          const isConnected = !!outgoingLink;
                           const isGuidance = !!ghost || activeTether?.sourceId === item.instanceId;
-                          const isVisible = isGuidance || isConnected;
+                          const isVisible = (isGuidance || isConnected) && !isFused;
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : 
                                     lp.color.includes('emerald') ? 'bg-emerald-500' : 
                                     lp.color.includes('fuchsia') ? 'bg-fuchsia-500' : 'bg-amber-400';
