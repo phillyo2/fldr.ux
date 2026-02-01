@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { LayoutGrid, Waypoints, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft, LayoutTemplate, Home, Shuffle, Shield } from 'lucide-react';
+import { LayoutGrid, Waypoints, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft, LayoutTemplate, Home, Shuffle, Shield, Activity, Globe, Bell, Send, Cpu, Layers, Clock, HardDrive, GitBranch, Timer, Repeat } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
@@ -40,11 +40,17 @@ export default function App() {
     color: 'bg-slate-900',
     items: [
       { name: 'New Action', icon: 'Plus', isBuilder: true },
-      { name: 'Actions', icon: 'Zap', isFolder: true, items: [] },
-      { name: 'Triggers', icon: 'Radio', isFolder: true, items: [] },
-      { name: 'Logic', icon: 'Code2', isFolder: true, items: [
-        { name: 'Circuit Breaker', icon: 'Shuffle', isBuilder: true }
-      ] }
+      { name: 'Actions', icon: 'Zap', isFolder: true, items: [
+        { name: 'Logic', icon: 'Code2', isFolder: true, items: [
+            { name: 'Circuit Breaker', icon: 'Shuffle', isBuilder: true }
+        ] },
+        { name: 'Triggers', icon: 'Radio', isFolder: true, items: [] }
+      ] },
+      { name: 'Modifiers', icon: 'Settings', isFolder: true, color: 'bg-amber-500', items: [
+        { name: 'Env Vars', icon: 'Globe', isBuilder: true },
+        { name: 'RBAC', icon: 'Shield', isBuilder: true },
+        { name: 'Config', icon: 'Settings', isBuilder: true }
+      ]}
     ]
   };
 
@@ -238,76 +244,107 @@ export default function App() {
     return ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
   };
 
-  const gatherLayout = () => {
+  const gatherLayout = (mode: 'grid' | 'tether' = 'grid') => {
     setCanvasItems(prev => {
-      const newItems = prev.map(item => ({ ...item }));
-      const origin = newItems.find(i => i.isOrigin);
-      if (!origin) return prev;
-      
-      const visited = new Set<string>();
-      const occupied = new Set<string>();
-      
-      const isPositionOccupied = (x: number, y: number) => {
-        for (const pos of occupied) {
-          const [ox, oy] = pos.split(',').map(Number);
-          if (Math.abs(ox - x) < 1 && Math.abs(oy - y) < 1) return true;
-        }
-        return false;
-      };
+        const newItems = prev.map(item => ({ ...item }));
+        const visited = new Set<string>();
+        const occupied = new Set<string>();
 
-      visited.add(origin.instanceId);
-      occupied.add(`${origin.x},${origin.y}`);
-      
-      const processNode = (nodeId: string, cx: number, cy: number) => {
-        const outgoing = connections.filter(c => c.sourceId === nodeId);
-        const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
-        
-        // Fuchsia providers go above
-        incomingFuchsia.forEach(conn => {
-            if (visited.has(conn.sourceId)) return;
-            const fx = cx;
-            const fy = cy - GRID_SIZE;
-            const source = newItems.find(i => i.instanceId === conn.sourceId);
-            if (source) {
-                source.x = fx; source.y = fy;
-                visited.add(source.instanceId); occupied.add(`${fx},${fy}`);
+        const isPositionOccupied = (x: number, y: number) => {
+            for (const pos of occupied) {
+                const [ox, oy] = pos.split(',').map(Number);
+                if (Math.abs(ox - x) < 1 && Math.abs(oy - y) < 1) return true;
             }
+            return false;
+        };
+
+        // 1. Organize Modifiers into a Top Grid
+        const modifiers = newItems.filter(i => !i.isOrigin && !connections.some(c => c.sourceId === i.instanceId || c.targetId === i.instanceId));
+        const modCols = 4;
+        modifiers.forEach((mod, idx) => {
+            const col = idx % modCols;
+            const row = Math.floor(idx / modCols);
+            mod.x = snapToGrid(windowSize.w / 2 - (modCols * GRID_SIZE) / 2 + col * GRID_SIZE, 0);
+            mod.y = snapToGrid(HEADER_OFFSET + row * GRID_SIZE, HEADER_OFFSET);
+            visited.add(mod.instanceId);
+            occupied.add(`${mod.x},${mod.y}`);
         });
 
-        outgoing.forEach(conn => {
-          if (visited.has(conn.targetId)) return;
-          if (conn.color.includes('fuchsia')) return;
+        // 2. Find Islands (Connected Components)
+        const roots = newItems.filter(i => {
+            if (visited.has(i.instanceId)) return false;
+            if (i.isOrigin) return true;
+            // A root has no incoming standard flow connections
+            const incomingFlow = connections.some(c => c.targetId === i.instanceId && !c.color.includes('fuchsia'));
+            return !incomingFlow;
+        });
 
-          let found = false, safety = 0, searchDist = GRID_SIZE, tx = cx, ty = cy;
-          
-          while (!found && safety < 15) {
-            let nextX = cx, nextY = cy;
-            if (conn.sourceSide === 'bottom') nextY += searchDist;
-            else if (conn.sourceSide === 'right') nextX += searchDist;
-            else if (conn.sourceSide === 'left') nextX -= searchDist;
-            else if (conn.sourceSide === 'top') nextY -= searchDist;
+        const processNode = (nodeId: string, cx: number, cy: number) => {
+            const outgoing = connections.filter(c => c.sourceId === nodeId);
+            const incomingFuchsia = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
+
+            // Fuchsia (Isolated Inputs) - Place 1 cell block above target
+            incomingFuchsia.forEach(conn => {
+                if (visited.has(conn.sourceId)) return;
+                const fx = cx;
+                const fy = cy - GRID_SIZE;
+                const source = newItems.find(i => i.instanceId === conn.sourceId);
+                if (source) {
+                    source.x = fx; source.y = fy;
+                    visited.add(source.instanceId); occupied.add(`${fx},${fy}`);
+                }
+            });
+
+            // Standard Flow Directions
+            outgoing.forEach(conn => {
+                if (visited.has(conn.targetId)) return;
+                if (conn.color.includes('fuchsia')) return;
+
+                let tx = cx, ty = cy;
+                const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+
+                if (conn.sourceSide === 'bottom') ty += step;
+                else if (conn.sourceSide === 'right') tx += step;
+                else if (conn.sourceSide === 'left') tx -= step;
+                else if (conn.sourceSide === 'top') ty -= step;
+
+                // Overlap Avoidance
+                let safety = 0;
+                while (isPositionOccupied(tx, ty) && safety < 10) {
+                    tx += GRID_SIZE;
+                    safety++;
+                }
+
+                const target = newItems.find(i => i.instanceId === conn.targetId);
+                if (target) {
+                    target.x = tx; target.y = ty;
+                    visited.add(target.instanceId); occupied.add(`${tx},${ty}`);
+                    processNode(target.instanceId, tx, ty);
+                }
+            });
+        };
+
+        // 3. Layout Islands
+        let islandOffsetY = 0;
+        roots.forEach((root, idx) => {
+            let startX = root.isOrigin ? snapToGrid(windowSize.w / 2 - 16, 0) : snapToGrid(128 + idx * 256, 0);
+            let startY = root.isOrigin ? snapToGrid(windowSize.h * 0.4, HEADER_OFFSET) : snapToGrid(windowSize.h * 0.6 + islandOffsetY, HEADER_OFFSET);
             
-            if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += GRID_SIZE; }
-            safety++;
-          }
-          
-          const target = newItems.find(i => i.instanceId === conn.targetId);
-          if (target && found) { 
-            target.x = tx; target.y = ty; 
-            visited.add(target.instanceId); occupied.add(`${tx},${ty}`); 
-            processNode(target.instanceId, tx, ty); 
-          }
+            root.x = startX; root.y = startY;
+            visited.add(root.instanceId); occupied.add(`${startX},${startY}`);
+            processNode(root.instanceId, startX, startY);
+            islandOffsetY += 128;
         });
-      };
-      
-      processNode(origin.instanceId, origin.x, origin.y);
 
-      // Jump to workflow center
-      const centerX = origin.x - (windowSize.w / 2) + 16;
-      const centerY = origin.y - (windowSize.h / 2) + 16;
-      setViewOffset({ x: -centerX, y: -centerY });
+        // 4. Centering View
+        const origin = newItems.find(i => i.isOrigin);
+        if (origin) {
+            const vx = - (origin.x - (windowSize.w / 2) + 16);
+            const vy = - (origin.y - (windowSize.h / 2) + 16);
+            setViewOffset({ x: vx, y: vy });
+        }
 
-      return newItems;
+        return newItems;
     });
   };
 
@@ -385,7 +422,7 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
-        // Persistence Protocol: Once active, the tether is locked until we hit a new target or end the drag.
+        // Persistence Protocol: Lock the tether until we find a new one or move far away
         const currentActiveGhost = ghosts.find((g: any) => 
           g.sourceId === activeTether.sourceId && 
           g.targetId === activeTether.targetId &&
@@ -396,10 +433,10 @@ export default function App() {
         if (!currentActiveGhost && best) {
           setActiveTether({ ...best });
         } else if (!currentActiveGhost && !best) {
-          // Check if we are totally out of the interaction zone
           const dragNode = itemsRef.current.find(i => i.instanceId === draggingId);
           if (dragNode) {
-            const other = itemsRef.current.find(i => i.instanceId === (draggingId === activeTether.sourceId ? activeTether.targetId : activeTether.sourceId));
+            const otherId = draggingId === activeTether.sourceId ? activeTether.targetId : activeTether.sourceId;
+            const other = itemsRef.current.find(i => i.instanceId === otherId);
             if (other) {
               const d = Math.sqrt(Math.pow(dragNode.x - other.x, 2) + Math.pow(dragNode.y - other.y, 2));
               if (d > DETECTION_RANGE) setActiveTether(null);
@@ -561,11 +598,14 @@ export default function App() {
       </main>
 
       <div className="fixed top-8 right-8 z-[1000] flex items-center gap-4 bg-white/50 backdrop-blur-sm p-3 rounded-xl border border-white/20 shadow-sm">
-         <input type="range" min="0.5" max="2" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-32 h-1 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+         <input type="range" min="0.5" max="2" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-24 h-1 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600" />
       </div>
 
       <div className="fixed bottom-8 left-8 z-[500] flex flex-col gap-2">
-         <div onClick={() => gatherLayout()} className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><LayoutGrid size={16} className="text-slate-400" /></div>
+         <div className="flex gap-2">
+           <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><LayoutGrid size={16} className="text-slate-400" /></div>
+           <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><Waypoints size={16} className="text-slate-400" /></div>
+         </div>
          <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20 mt-2"><Folder size={16} className="text-white" /></div>
       </div>
       
