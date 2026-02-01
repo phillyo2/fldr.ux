@@ -86,55 +86,58 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Logical reachability helpers
-  const isDescendantOf = (childId: string, potentialParentId: string, currentConns: Connection[]) => {
-    const stack = [potentialParentId];
-    const visited = new Set();
-    while (stack.length > 0) {
-        const curr = stack.pop();
-        if (!curr) continue;
-        if (curr === childId) return true;
-        if (visited.has(curr)) continue;
-        visited.add(curr);
-        currentConns.filter(c => c.sourceId === curr).forEach(c => stack.push(c.targetId));
-    }
-    return false;
-  };
-
+  // Logical reachability and Tree Isolation helpers
   const mainNodes = useMemo(() => {
-    const main = new Set();
-    const origins = canvasItems.filter(i => i.isOrigin);
-    const queue = origins.map(o => o.instanceId);
-    origins.forEach(o => main.add(o.instanceId));
+    const main = new Set<string>();
+    const origin = canvasItems.find(i => i.isOrigin);
+    if (!origin) return main;
+    
+    const queue = [origin.instanceId];
+    main.add(origin.instanceId);
+    
     let safety = 0;
     while(queue.length > 0 && safety < 1000) {
-      const currentId = queue.shift();
-      // Main workflow follows Emerald (bottom) or Rose (right) paths
-      const outgoing = connections.filter(c => c.sourceId === currentId && c.sourceSide !== 'left');
+      const currId = queue.shift()!;
+      // Main workflow only follows Success (bottom) or Error (right) paths
+      const outgoing = connections.filter(c => c.sourceId === currId && (c.sourceSide === 'bottom' || c.sourceSide === 'right'));
       outgoing.forEach(conn => {
-        if (!main.has(conn.targetId)) { main.add(conn.targetId); queue.push(conn.targetId); }
+        if (!main.has(conn.targetId)) {
+          main.add(conn.targetId);
+          queue.push(conn.targetId);
+        }
       });
-      safety++;
+       safety++;
     }
     return main;
   }, [canvasItems, connections]);
 
-  const poweredNodes = useMemo(() => {
-    const powered = new Set();
-    const origins = canvasItems.filter(i => i.isOrigin);
-    const queue = origins.map(o => o.instanceId);
-    origins.forEach(o => powered.add(o.instanceId));
+  const getTreeRoot = (id: string): string | null => {
+    if (mainNodes.has(id)) return 'MAIN';
+    
+    // Check if this node is part of a subtree
+    // Trace back to the node that has an incoming 'left' (Amber) connection
+    const visited = new Set<string>();
+    let currentId = id;
+    
     let safety = 0;
-    while(queue.length > 0 && safety < 1000) {
-      const currentId = queue.shift();
-      const outgoing = connections.filter(c => c.sourceId === currentId);
-      outgoing.forEach(conn => {
-        if (!powered.has(conn.targetId)) { powered.add(conn.targetId); queue.push(conn.targetId); }
-      });
-      safety++;
+    while (safety < 100) {
+        if (visited.has(currentId)) return null; // Cycle
+        visited.add(currentId);
+        
+        const incoming = connections.find(c => c.targetId === currentId);
+        if (!incoming) return null; // Unattached
+        
+        if (incoming.sourceSide === 'left') {
+            // This is the head of a subtree
+            return currentId; 
+        }
+        
+        currentId = incoming.sourceId;
+        if (mainNodes.has(currentId)) return 'MAIN';
+        safety++;
     }
-    return powered;
-  }, [canvasItems, connections]);
+    return null;
+  };
 
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
     if (activeTether) return [];
@@ -142,7 +145,7 @@ export default function App() {
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
 
-    const isDragMain = mainNodes.has(dId);
+    const dragTreeRoot = getTreeRoot(dId);
 
     items.forEach(other => {
       if (other.instanceId === dId) return;
@@ -158,21 +161,18 @@ export default function App() {
       let snapY = other.y;
 
       // DIRECTIONAL HANDSHAKE PROTOCOL
-      // Success (Emerald): Positioned below
       if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
         sourceSide = 'bottom';
         color = 'bg-emerald-500';
         snapX = other.x;
         snapY = other.y + 32;
       } 
-      // Error (Rose): Positioned to the right
       else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
         sourceSide = 'right';
         color = 'bg-rose-500';
         snapX = other.x + 32;
         snapY = other.y;
       } 
-      // Subtree (Amber): Positioned to the left
       else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
         sourceSide = 'left';
         color = 'bg-amber-400';
@@ -181,28 +181,22 @@ export default function App() {
       }
 
       if (sourceSide) {
-          // ISOLATION LOGIC
-          const isOtherMain = mainNodes.has(other.instanceId);
+          const otherTreeRoot = getTreeRoot(other.instanceId);
           let isValid = false;
 
           if (sourceSide === 'left') {
-            // Subtree Entry: Only Main can branch to a Subtree, and it must not already be in Main
-            isValid = isOtherMain && !isDragMain;
+            // SUBTREE ISOLATION: Only MAIN nodes can start a subtree. 
+            // The dragged node must be unattached.
+            isValid = (otherTreeRoot === 'MAIN') && (dragTreeRoot === null);
           } else {
-            // Standard Flow: Source and Target must be in the same logical tree type
-            // (Both Main or both Subtree)
-            const isDragInSubtree = poweredNodes.has(dId) && !isDragMain;
-            const isOtherInSubtree = poweredNodes.has(other.instanceId) && !isOtherMain;
-            
-            if (isOtherMain) {
-              isValid = !isDragInSubtree; // Main nodes can only connect to other Main or unconnected nodes
-            } else if (isOtherInSubtree) {
-              // Subtree nodes can only connect to nodes within their same branch
-              isValid = isDescendantOf(other.instanceId, dId, connections) || !poweredNodes.has(dId);
-            }
+            // STANDARD FLOW ISOLATION: 
+            // 1. Both nodes are in the same tree (MAIN or the same SUBTREE).
+            // 2. Target is in a tree, but dragging node is unattached.
+            isValid = (otherTreeRoot === dragTreeRoot && otherTreeRoot !== null) || 
+                      (otherTreeRoot !== null && dragTreeRoot === null);
           }
 
-          if (isValid && !isDescendantOf(other.instanceId, dId, connections)) {
+          if (isValid) {
             const dotDist = Math.sqrt(Math.pow(snapX - dragNode.x, 2) + Math.pow(snapY - dragNode.y, 2));
             ghosts.push({ 
               id: 'ghost',
@@ -436,9 +430,9 @@ export default function App() {
                     style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                     <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border transition-all 
                       ${item.isOrigin ? 'border-blue-400 ring-1 ring-blue-50 shadow-blue-100' : (item.isRegistered ? 'border-slate-200 shadow-slate-100' : 'border-emerald-300 ring-1 ring-emerald-50 shadow-emerald-50')}
-                      ${poweredNodes.has(item.instanceId) ? 'shadow-emerald-200 ring-1 ring-emerald-100' : ''}
+                      ${mainNodes.has(item.instanceId) ? 'shadow-emerald-200 ring-1 ring-emerald-100' : ''}
                     `}>
-                      <SafeIcon name={item.icon} size={16} className={item.isRegistered ? (poweredNodes.has(item.instanceId) ? 'text-slate-800' : 'text-slate-400') : 'text-emerald-500'} />
+                      <SafeIcon name={item.icon} size={16} className={item.isRegistered ? (mainNodes.has(item.instanceId) ? 'text-slate-800' : 'text-slate-400') : 'text-emerald-500'} />
                     </div>
                     <div className="absolute top-full mt-1 w-full text-center text-[6px] font-black uppercase text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 bg-white/80 px-1 rounded shadow-sm">{item.name}</div>
                   </div>
