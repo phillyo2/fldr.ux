@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -13,6 +12,7 @@ import {
   DRAG_THRESHOLD, LONG_PRESS_MS, LATCH_POINTS, GRID_SIZE 
 } from '@/lib/constants';
 import { getSmartPath, snapToGrid, isAncestor } from '@/lib/pathing';
+import { calculateGhostHandshakes, getPortState } from '@/lib/handshake-engine';
 
 export default function App() {
   // --- STATE ---
@@ -111,92 +111,6 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
-  const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
-    const contexts = new Map<string, string>();
-    const visited = new Set<string>();
-    const queue: {id: string, context: string}[] = [{id: 'entry_origin', context: 'main'}];
-    contexts.set('entry_origin', 'main');
-
-    while(queue.length > 0) {
-      const {id, context} = queue.shift()!;
-      if (visited.has(id)) continue;
-      visited.add(id);
-
-      const outgoing = currentConnections.filter(c => c.sourceId === id);
-      for (const conn of outgoing) {
-        contexts.set(conn.targetId, context);
-        queue.push({id: conn.targetId, context: context});
-      }
-    }
-    return contexts.get(nodeId) || null;
-  };
-
-  const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
-    const ghosts: Connection[] = [];
-    const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
-    if (!dragNode) return ghosts;
-
-    const dragCtx = getTreeContext(dId, connRef.current);
-    const fuchsiaProviders = new Set(connRef.current.filter(c => c.color.includes('fuchsia')).map(c => c.sourceId));
-
-    if (fuchsiaProviders.has(dId)) return ghosts;
-
-    const getPortPos = (item: any, side: string) => {
-      if (side === 'top') return { x: item.x + 16, y: item.y };
-      if (side === 'bottom') return { x: item.x + 16, y: item.y + 32 };
-      if (side === 'right') return { x: item.x + 32, y: item.y + 16 };
-      if (side === 'left') return { x: item.x, y: item.y + 16 };
-      return { x: item.x + 16, y: item.y + 16 };
-    };
-
-    items.forEach(other => {
-      if (other.instanceId === dId) return;
-      if (fuchsiaProviders.has(other.instanceId)) return;
-      const otherCtx = getTreeContext(other.instanceId, connRef.current);
-
-      LATCH_POINTS.forEach(lSource => {
-        const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
-        const sPos = getPortPos(dragNode, lSource.id);
-        const tPos = getPortPos(other, lTarget.id);
-        const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
-
-        if (dist < DETECTION_RANGE) {
-          let color = lSource.color.replace('bg-', '');
-          let valid = false;
-          if (!dragCtx && otherCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
-            const dragHasAnyConnection = connRef.current.some(c => c.sourceId === dId || c.targetId === dId);
-            if (!dragHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
-          }
-          else if (dragCtx && !otherCtx && lSource.id !== 'top') { valid = true; }
-          else if (dragCtx && otherCtx && dragCtx === otherCtx) {
-            if (isAncestor(other.instanceId, dId, connRef.current)) {
-              if ((lSource.id === 'bottom' || lSource.id === 'right') && lTarget.id === 'top') { valid = true; color = 'blue-500'; }
-            }
-          }
-          if (valid) ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: lSource.id, targetId: other.instanceId, targetSide: lTarget.id, color, dotDistance: dist } as any);
-        }
-
-        const sPosInv = getPortPos(other, lSource.id);
-        const tPosInv = getPortPos(dragNode, lTarget.id);
-        const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
-        if (distInv < DETECTION_RANGE) {
-          let color = lSource.color.replace('bg-', '');
-          let valid = false;
-          if (otherCtx && !dragCtx && lSource.id !== 'top') {
-            const dragHasAnyConnection = connRef.current.some(c => c.sourceId === dId || c.targetId === dId);
-            if (!dragHasAnyConnection) valid = true;
-          }
-          if (!otherCtx && dragCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
-             const otherHasAnyConnection = connRef.current.some(c => c.sourceId === other.instanceId || c.targetId === other.instanceId);
-             if (!otherHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
-          }
-          if (valid) ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: lSource.id, targetId: dId, targetSide: lTarget.id, color, dotDistance: distInv } as any);
-        }
-      });
-    });
-    return ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance);
-  };
-
   const gatherLayout = (mode: 'grid' | 'tether') => {
     setLayoutMode(mode);
     setIsTransitioning(true);
@@ -223,13 +137,11 @@ export default function App() {
             ...connections.map(c => c.targetId)
         ]);
 
-        // Treat Entry Points (isTrigger or isOrigin) as part of flows even if unconnected
         const standalone = newItems.filter(i => !connIds.has(i.instanceId) && !i.isTrigger && !i.isOrigin);
         const inFlow = newItems.filter(i => connIds.has(i.instanceId) || i.isTrigger || i.isOrigin);
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
         const roots = inFlow.filter(i => !incomingTargetIds.has(i.instanceId));
 
-        // 1. Layout Stand-alone tiles grid (Dense: No extra padding)
         let sx = 64, sy = 120;
         standalone.forEach((item, idx) => {
           item.x = snapToGrid(sx + (idx % 8) * GRID_SIZE, 0);
@@ -238,7 +150,6 @@ export default function App() {
           visited.add(item.instanceId);
         });
 
-        // 2. Layout Workflows Horizontally
         let currentFlowX = snapToGrid(windowSize.w / 2 - 16, 0);
         const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
@@ -250,40 +161,29 @@ export default function App() {
 
         sortedRoots.forEach((root) => {
             let maxNodeX = currentFlowX;
-            
             const processNode = (nodeId: string, cx: number, cy: number) => {
                 visited.add(nodeId);
                 occupied.add(getPosKey(cx, cy));
                 maxNodeX = Math.max(maxNodeX, cx);
-                
                 const node = newItems.find(i => i.instanceId === nodeId);
                 if (node) { node.x = cx; node.y = cy; }
-
                 const outgoing = connections.filter(c => c.sourceId === nodeId);
                 outgoing.forEach(conn => {
                     if (visited.has(conn.targetId)) return;
                     const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
                     let tx = cx, ty = cy;
-
                     if (conn.sourceSide === 'bottom') ty += step * 2;
                     else if (conn.sourceSide === 'right') tx += step * 2;
                     else if (conn.sourceSide === 'left') tx -= step * 2;
                     else if (conn.sourceSide === 'top') ty -= step * 2;
-
-                    const { tx: finalX, ty: finalY } = findSafePosition(
-                        snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), 
-                        0, GRID_SIZE
-                    );
+                    const { tx: finalX, ty: finalY } = findSafePosition(snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), 0, GRID_SIZE);
                     processNode(conn.targetId, finalX, finalY);
                 });
             };
-
             processNode(root.instanceId, currentFlowX, startY);
-            // Reduced gap between workflows: 2 cell blocks (64px) + buffer
             currentFlowX = snapToGrid(maxNodeX + GRID_SIZE * 3, 0);
         });
 
-        // 3. Pan to Origin
         const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
         if (origin) {
             const targetVX = windowSize.w / 2 - (origin.x + 16) * zoom;
@@ -299,64 +199,34 @@ export default function App() {
   const handleSmartBirth = (item: Partial<FolderItem>) => {
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
-
     let bestAnchorPos = { x: screenCenterX, y: screenCenterY };
     let minDist = Infinity;
-
     canvasItems.forEach(node => {
-      // Prioritize output anchors (Bottom or Right)
-      const bX = node.x + 16;
-      const bY = node.y + 32;
+      const bX = node.x + 16; const bY = node.y + 32;
       const dBottom = Math.sqrt(Math.pow(bX - screenCenterX, 2) + Math.pow(bY - screenCenterY, 2));
-      if (dBottom < minDist) {
-        minDist = dBottom;
-        bestAnchorPos = { x: bX, y: bY };
-      }
-      const rX = node.x + 32;
-      const rY = node.y + 16;
+      if (dBottom < minDist) { minDist = dBottom; bestAnchorPos = { x: bX, y: bY }; }
+      const rX = node.x + 32; const rY = node.y + 16;
       const dRight = Math.sqrt(Math.pow(rX - screenCenterX, 2) + Math.pow(rY - screenCenterY, 2));
-      if (dRight < minDist) {
-        minDist = dRight;
-        bestAnchorPos = { x: rX, y: rY };
-      }
+      if (dRight < minDist) { minDist = dRight; bestAnchorPos = { x: rX, y: rY }; }
     });
-
     let spawnX = snapToGrid(bestAnchorPos.x - 16, 0);
     let spawnY = snapToGrid(bestAnchorPos.y + GRID_SIZE, HEADER_OFFSET);
-
     const occupied = new Set(canvasItems.map(i => `${Math.round(i.x)},${Math.round(i.y)}`));
     let safety = 0;
-    while (occupied.has(`${Math.round(spawnX)},${Math.round(spawnY)}`) && safety < 10) {
-      spawnY += GRID_SIZE;
-      safety++;
-    }
-
+    while (occupied.has(`${Math.round(spawnX)},${Math.round(spawnY)}`) && safety < 10) { spawnY += GRID_SIZE; safety++; }
     const newInstanceId = `inst_${Date.now()}`;
     const newItem = { ...item, instanceId: newInstanceId, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem;
     setCanvasItems(prev => [...prev, newItem]);
-
-    // Soft Panning: shift view if spawn is near edge
     const margin = 150;
     const screenSpawnX = spawnX * zoom + viewOffset.x;
     const screenSpawnY = (spawnY - HEADER_OFFSET) * zoom + viewOffset.y;
-
-    if (
-      screenSpawnX < margin || 
-      screenSpawnX > windowSize.w - margin ||
-      screenSpawnY < margin ||
-      screenSpawnY > windowSize.h - margin
-    ) {
+    if (screenSpawnX < margin || screenSpawnX > windowSize.w - margin || screenSpawnY < margin || screenSpawnY > windowSize.h - margin) {
       const targetVX = windowSize.w / 2 - (spawnX + 16) * zoom;
       const targetVY = windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom;
-      
       setIsTransitioning(true);
-      setViewOffset(prev => ({
-        x: prev.x + (targetVX - prev.x) * 0.6,
-        y: prev.y + (targetVY - prev.y) * 0.6
-      }));
+      setViewOffset(prev => ({ x: prev.x + (targetVX - prev.x) * 0.6, y: prev.y + (targetVY - prev.y) * 0.6 }));
       setTimeout(() => setIsTransitioning(false), 500);
     }
-
     setActiveFolderView(null);
   };
 
@@ -401,55 +271,33 @@ export default function App() {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = 'clientX' in e ? e.clientX : (e as TouchEvent).touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : (e as TouchEvent).touches[0].clientY;
-      
       if (dragStartPos && !isDragging) {
           const dist = Math.sqrt(Math.pow(clientX - dragStartPos.x, 2) + Math.pow(clientX - dragStartPos.y, 2));
-          if (dist > DRAG_THRESHOLD) { 
-            setIsDragging(true); 
-            setDraggingId(dragStartPos.id); 
-            if (pressTimer.current) clearTimeout(pressTimer.current); 
-          }
+          if (dist > DRAG_THRESHOLD) { setIsDragging(true); setDraggingId(dragStartPos.id); if (pressTimer.current) clearTimeout(pressTimer.current); }
       }
-
       if (!isDragging && !isPanning) return;
-      
       if (isPanning) {
-        const dx = clientX - panStart.current.x;
-        const dy = clientY - panStart.current.y;
+        const dx = clientX - panStart.current.x; const dy = clientY - panStart.current.y;
         setViewOffset({ x: panOffsetStart.current.x + dx, y: panOffsetStart.current.y + dy });
         return;
       }
-
       const x = (clientX - viewOffset.x) / zoom - mouseOffset.current.x; 
       const y = (clientY - viewOffset.y) / zoom - mouseOffset.current.y;
       setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x, y } : i));
-      
-      const ghosts = calculateGhostHandshakes(itemsRef.current, draggingId!, { x, y });
+      const ghosts = calculateGhostHandshakes(itemsRef.current, connRef.current, draggingId!, { x, y });
       const best = ghosts[0] as any;
-      
-      if (best && (activeTether || best.dotDistance < SNAP_TOLERANCE)) {
-        setActiveTether({ ...best });
-      }
+      if (best && (activeTether || best.dotDistance < SNAP_TOLERANCE)) { setActiveTether({ ...best }); }
     };
 
     const handleUp = (e: MouseEvent | TouchEvent) => {
-      setDragStartPos(null); 
-      if (pressTimer.current) clearTimeout(pressTimer.current);
-      
-      if (isPanning) { 
-        setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); 
-        setIsPanning(false); 
-        return; 
-      }
-
+      setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
+      if (isPanning) { setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); setIsPanning(false); return; }
       if (!isDragging) return; 
-      
       setCanvasItems(prev => {
         const item = prev.find(i => i.instanceId === draggingId); if (!item) return prev;
         let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
         return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
       });
-
       if (activeTether) { 
         setConnections(prev => {
           const exists = prev.find(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide);
@@ -459,7 +307,6 @@ export default function App() {
       } 
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
     };
-
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleMove); window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
@@ -470,7 +317,6 @@ export default function App() {
       <main className="absolute inset-0 overflow-hidden">
         <div className="w-full h-full relative overflow-hidden bg-white" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
           <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `${32 * zoom}px ${32 * zoom}px`, backgroundPosition: `${(viewOffset.x + 16 * zoom) % (32 * zoom)}px ${(viewOffset.y + 16 * zoom) % (32 * zoom)}px` }} />
-
           <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0' }} className={`w-full h-full relative ${isTransitioning ? 'transition-transform duration-500 ease-in-out' : ''}`}>
               {currentPageId === 'studio' ? (
                 <>
@@ -480,13 +326,10 @@ export default function App() {
                           if(!s || !t) return null;
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
-                          
                           const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
                           const isFuchsia = conn.color.includes('fuchsia');
                           const isPersistent = isFuchsia || conn.color.includes('emerald') || conn.color.includes('rose');
-                          
                           if (!isPersistent && dist < 48) return null;
-
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems, connections);
                           let strokeColor = '#3B82F6'; 
                           if (conn.color.includes('emerald')) strokeColor = '#10B981';
@@ -496,12 +339,7 @@ export default function App() {
                           return (
                             <React.Fragment key={conn.id}>
                               <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeLinecap="round" />
-                              <circle 
-                                cx={pathData.mid.x} cy={pathData.mid.y} r={8 / zoom} 
-                                fill="white" stroke={strokeColor} strokeWidth={2 / zoom} 
-                                className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform shadow-sm" 
-                                onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }}
-                              />
+                              <circle cx={pathData.mid.x} cy={pathData.mid.y} r={8 / zoom} fill="white" stroke={strokeColor} strokeWidth={2 / zoom} className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform shadow-sm" onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }} />
                             </React.Fragment>
                           );
                       })}
@@ -520,29 +358,12 @@ export default function App() {
                       })()}
                   </svg>
                   {canvasItems.map(item => (
-                    <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
-                      className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                    <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)} className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                       <div className={`w-[30px] h-[30px] ${(item.isOrigin || item.isTrigger) ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${(item.isOrigin || item.isTrigger) ? 'border-slate-800' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
                         {(item.isOrigin || item.isTrigger) ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />}
                         {LATCH_POINTS.map(lp => {
-                          const connectedAsSource = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
-                          const connectedAsTarget = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
-                          const tethered = activeTether && ((activeTether.sourceId === item.instanceId && activeTether.sourceSide === lp.id) || (activeTether.targetId === item.instanceId && activeTether.targetSide === lp.id));
-                          
-                          let dotColor = 'bg-slate-200';
-                          let opacityClass = 'opacity-0 scale-50';
-
-                          if (connectedAsSource || connectedAsTarget || tethered) {
-                            if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
-                            else if (lp.id === 'right') dotColor = 'bg-rose-500';
-                            else if (lp.id === 'left') dotColor = 'bg-amber-400';
-                            else { 
-                              const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
-                              const activeIsFuchsia = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia');
-                              dotColor = (isFuchsia || activeIsFuchsia) ? 'bg-fuchsia-500' : 'bg-blue-500'; 
-                            }
-                            opacityClass = 'opacity-100 scale-100';
-                          }
+                          const { dotColor, isActive } = getPortState(item, lp, connections, activeTether);
+                          const opacityClass = isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-50';
                           return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
                         })}
                       </div>
@@ -561,31 +382,26 @@ export default function App() {
           </div>
         </div>
       </main>
-
       <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <LayoutGrid size={20} className="text-slate-600" />
       </div>
       <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <Waypoints size={20} className="text-slate-600" />
       </div>
-
       <div onClick={handleZoomIn} title="Zoom In" className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <Plus size={20} className="text-slate-700" />
       </div>
       <div onClick={handleZoomOut} title="Zoom Out" className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-95 border border-slate-200 rounded-md shadow-sm p-0 box-border">
         <Minus size={20} className="text-slate-700" />
       </div>
-
       <div onClick={() => setActiveFolderView('toolbox')} className="fixed bottom-[28px] left-[28px] z-[500] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800 p-0 box-border">
         <Folder size={20} className="text-white" />
       </div>
       <div onClick={() => setActiveFolderView('nav')} className="fixed bottom-[28px] right-[28px] z-[500] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700 p-0 box-border">
         <Compass size={20} className="text-white" />
       </div>
-
       <AndroidFolder title={navData.title} icon={navData.icon} color={navData.color} items={navData.items} isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
       <AndroidFolder title={toolboxData.title} icon={toolboxData.icon} color={toolboxData.color} items={toolboxData.items} isOpen={activeFolderView === 'toolbox'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
-
       {isStudioOpen && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-slate-100 space-y-6">
