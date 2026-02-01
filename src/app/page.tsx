@@ -19,9 +19,10 @@ export default function App() {
   const [currentPageId, setCurrentPageId] = useState('studio');
   const [activeFolderView, setActiveFolderView] = useState<string | null>(null);
   const [windowSize, setWindowSize] = useState({ w: 1024, h: 768 });
+  const [isReady, setIsReady] = useState(false);
   
   const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([
-    { instanceId: 'entry_origin', name: 'Entry Point', icon: 'Shield', x: 128, y: 128 + HEADER_OFFSET, isRegistered: true, isOrigin: true }
+    { instanceId: 'entry_origin', name: 'Entry Point', icon: 'Shield', x: 0, y: 128 + HEADER_OFFSET, isRegistered: true, isOrigin: true }
   ]);
   const [connections, setConnections] = useState<Connection[]>([]); 
   const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
@@ -80,14 +81,19 @@ export default function App() {
   const [deploymentValues, setDeploymentValues] = useState({});
 
   useEffect(() => {
-    setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    setWindowSize({ w, h });
     
-    // Center the origin node on mount
-    const centerX = snapToGrid(window.innerWidth / 2 - 16, 0);
+    // Position the origin node perfectly centered instantly
+    const centerX = snapToGrid(w / 2 - 16, 0);
     setCanvasItems(prev => prev.map(item => 
       item.isOrigin ? { ...item, x: centerX } : item
     ));
     lastValidPos.current = { x: centerX, y: 128 + HEADER_OFFSET };
+    
+    // Enable transitions only after the initial position is set
+    setTimeout(() => setIsReady(true), 50);
 
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
@@ -126,7 +132,6 @@ export default function App() {
           // Resolve collisions
           let safety = 0;
           while (occupied.has(`${tx},${ty}`) && safety < 20) {
-            // Push slightly out if collision
             if (conn.sourceSide === 'bottom' || conn.sourceSide === 'top') tx += 32;
             else ty += 32;
             safety++;
@@ -145,7 +150,7 @@ export default function App() {
 
       processNode(origin.instanceId, origin.x, origin.y);
       
-      // Secondary pass for unattached nodes or extra inputs
+      // Secondary pass for unattached nodes
       newItems.forEach(item => {
         if (!visited.has(item.instanceId)) {
           const outgoing = connections.find(c => c.sourceId === item.instanceId && visited.has(c.targetId));
@@ -233,7 +238,6 @@ export default function App() {
     if (!dragNode) return ghosts;
 
     if (isExtraInput(dId)) return [];
-
     const dragTreeId = getTreeId(dId);
 
     items.forEach(other => {
@@ -250,15 +254,12 @@ export default function App() {
       const isUnattachedToCanvas = (otherTreeId !== null && dragTreeId === null);
 
       if (isSameTree || isUnattachedToCanvas) {
-          // Emerald (Success) -> Below
           if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', displayColor: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
           } 
-          // Rose (Error) -> Right
           else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
           } 
-          // Amber (Subtree) -> Left (ONLY FOR NEW TILES)
           else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
             if (dragTreeId === null) {
               ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
@@ -266,7 +267,6 @@ export default function App() {
           }
       }
 
-      // Blue (Go-To Recursion)
       if (isSameTree && isAncestor(other.instanceId, dId)) {
           if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
              ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
@@ -276,7 +276,6 @@ export default function App() {
           }
       }
 
-      // Fuchsia (Extra Input / Data Provider) -> Above any tile
       if (isUnattachedToCanvas && dragTreeId === null) {
           if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
             ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', displayColor: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any);
@@ -338,7 +337,7 @@ export default function App() {
     const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
     const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
     setDragStartPos({ id: item.instanceId, x: clientX, y: clientY });
-    mouseOffset.current = { x: clientX - item.x, y: clientY - item.y + DRAG_VISUAL_OFFSET };
+    mouseOffset.current = { x: clientX - item.x, y: clientY - item.y };
     lastValidPos.current = { x: item.x, y: item.y };
     pressTimer.current = setTimeout(() => { setIsDragging(true); setDraggingId(item.instanceId); }, LONG_PRESS_MS);
   };
@@ -465,17 +464,17 @@ export default function App() {
             <div className="fixed top-20 right-8 z-[100] flex flex-col gap-2">
               <div 
                 onClick={() => gatherLayout('grid')} 
-                title="Crossword / Grid View"
-                className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all group"
+                title="Crossword View"
+                className="w-10 h-10 bg-white border border-slate-200 rounded-xl shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all group"
               >
-                <LayoutGrid size={16} className="text-slate-400 group-hover:text-primary transition-colors" />
+                <LayoutGrid size={20} className="text-slate-400 group-hover:text-primary transition-colors" />
               </div>
               <div 
                 onClick={() => gatherLayout('tether')} 
-                title="Tether / Spread View"
-                className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all group"
+                title="Tether View"
+                className="w-10 h-10 bg-white border border-slate-200 rounded-xl shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all group"
               >
-                <Waypoints size={16} className="text-slate-400 group-hover:text-primary transition-colors" />
+                <Waypoints size={20} className="text-slate-400 group-hover:text-primary transition-colors" />
               </div>
             </div>
 
@@ -485,7 +484,6 @@ export default function App() {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
                         
-                        // Fusion Logic: Hide line when flush at connection side (EXCEPT FOR RECURSION)
                         const isRecursive = conn.color.includes('blue');
                         const isAdjacent = !isRecursive && (
                            (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
@@ -531,7 +529,8 @@ export default function App() {
 
                 {canvasItems.map(item => (
                   <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
-                    className={`absolute cursor-pointer group ${isDragging && draggingId === item.instanceId ? 'scale-110 z-[1000]' : 'transition-all duration-300 z-10'} flex items-center justify-center`} 
+                    className={`absolute cursor-pointer group flex items-center justify-center
+                      ${isDragging && draggingId === item.instanceId ? 'scale-110 z-[1000] transition-none' : (isReady ? 'transition-all duration-300' : 'transition-none')} z-10`} 
                     style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                     <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border transition-all 
                       ${item.isOrigin ? 'border-blue-400 ring-1 ring-blue-50 shadow-blue-100' : (item.isRegistered ? 'border-slate-200 shadow-slate-100' : 'border-emerald-300 ring-1 ring-emerald-50 shadow-emerald-50')}
