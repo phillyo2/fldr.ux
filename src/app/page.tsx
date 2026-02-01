@@ -388,7 +388,7 @@ export default function App() {
                         const s = canvasItems.find(i => i.instanceId === conn.sourceId), t = canvasItems.find(i => i.instanceId === conn.targetId);
                         if(!s || !t) return null;
                         
-                        // Fusion Logic: Only hide if adjacent to the specific port side
+                        // Fusion Logic: Hide line when flush at connection side
                         const isAdjacent = (conn.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
                                            (conn.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
                                            (conn.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y);
@@ -415,7 +415,7 @@ export default function App() {
 
                         if (isAdjacent) return null;
 
-                        const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
+                        const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                         const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                         const c = activeTether.color.includes('rose') ? '#F43F5E' : 
                                   activeTether.color.includes('emerald') ? '#10B981' : 
@@ -471,12 +471,11 @@ export default function App() {
                     )
                 })}
 
-                {/* PASS 1: Child Ports (Inputs - Blue) */}
+                {/* PASS 1: Child Ports (Inputs - Blue) - Hides on fusion */}
                 {canvasItems.map(item => (
                     <div key={`latch_inputs_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1001]' : 'z-20'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type === 'input').map(lp => {
                           const ghost = ghostConnections.find(g => g.targetId === item.instanceId && g.targetSide === lp.id);
-                          const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const incomingLink = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           
                           const s = incomingLink ? canvasItems.find(i => i.instanceId === incomingLink.sourceId) : null;
@@ -487,6 +486,7 @@ export default function App() {
 
                           const isConnected = !!incomingLink;
                           const isGuidance = !!ghost || activeTether?.targetId === item.instanceId;
+                          // Input dot disappears if fused
                           const isVisible = (isGuidance || isConnected) && !isFused;
                           const c = lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300';
                           return (
@@ -501,22 +501,18 @@ export default function App() {
                     </div>
                 ))}
 
-                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow, Fuchsia) */}
+                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow, Fuchsia) - Always stays visible if active */}
                 {canvasItems.map(item => (
                     <div key={`latch_parents_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1002]' : 'z-21'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type !== 'input').map(lp => {
                           const ghost = ghostConnections.find(g => g.sourceId === item.instanceId && g.sourceSide === lp.id);
                           const outgoingLink = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           
-                          const s = item;
-                          const t = outgoingLink ? canvasItems.find(i => i.instanceId === outgoingLink.targetId) : null;
-                          const isFused = t && ((outgoingLink?.sourceSide === 'bottom' && s.x === t.x && s.y === t.y - 32) ||
-                                               (outgoingLink?.sourceSide === 'right' && s.x === t.x - 32 && s.y === t.y) ||
-                                               (outgoingLink?.sourceSide === 'left' && s.x === t.x + 32 && s.y === t.y));
-
                           const isConnected = !!outgoingLink;
                           const isGuidance = !!ghost || activeTether?.sourceId === item.instanceId;
-                          const isVisible = (isGuidance || isConnected) && !isFused;
+                          // Parent dots ALWAYS stay visible if connected or guidance exists
+                          const isVisible = (isGuidance || isConnected);
+                          
                           const c = lp.color.includes('rose') ? 'bg-rose-500' : 
                                     lp.color.includes('emerald') ? 'bg-emerald-500' : 
                                     lp.color.includes('fuchsia') ? 'bg-fuchsia-500' : 'bg-amber-400';
