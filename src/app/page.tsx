@@ -125,40 +125,52 @@ export default function App() {
     items.forEach(other => {
       if (other.instanceId === dId) return;
 
-      const dx = (dragNode.x || 0) - other.x; const dy = (dragNode.y || 0) - other.y;
-      const adx = Math.abs(dx); const ady = Math.abs(dy);
+      const dx = (dragNode.x || 0) - other.x;
+      const dy = (dragNode.y || 0) - other.y;
       
-      const isRecursion = isDescendantOf(other.instanceId, dId, connRef.current);
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
       
-      if (adx > DETECTION_RANGE || ady > DETECTION_RANGE) return;
+      let sourceSide = null;
+      let color = '';
+      let snapX = other.x;
+      let snapY = other.y;
 
-      let targetPort = null; let sourcePort = null;
-      let color = 'bg-slate-300';
-
-      if (adx < SNAP_TOLERANCE) {
-          if (dy > 0) { targetPort = 'bottom'; sourcePort = 'top'; color = 'bg-emerald-500'; } 
-          else { targetPort = 'top'; sourcePort = 'bottom'; color = 'bg-blue-500'; } 
-      } else if (ady < SNAP_TOLERANCE) {
-          if (dx > 0) { targetPort = 'right'; sourcePort = 'left'; color = 'bg-rose-500'; } 
-          else { targetPort = 'left'; sourcePort = 'right'; color = 'bg-amber-400'; } 
+      // DIRECTIONAL HANDSHAKE PROTOCOL
+      // Success (Emerald): Positioned below
+      if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
+        sourceSide = 'bottom';
+        color = 'bg-emerald-500';
+        snapX = other.x;
+        snapY = other.y + 32;
+      } 
+      // Error (Rose): Positioned to the right
+      else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+        sourceSide = 'right';
+        color = 'bg-rose-500';
+        snapX = other.x + 32;
+        snapY = other.y;
+      } 
+      // Subtree (Amber): Positioned to the left
+      else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
+        sourceSide = 'left';
+        color = 'bg-amber-400';
+        snapX = other.x - 32;
+        snapY = other.y;
       }
 
-      if (isRecursion) {
-          targetPort = 'top'; color = 'bg-blue-500';
-          if (dy > adx) sourcePort = 'bottom';
-          else if (dx > ady) sourcePort = 'right';
-          else sourcePort = 'left';
-      }
-
-      if (targetPort && sourcePort) {
-          const snapX = other.x + (targetPort === 'right' ? 32 : (targetPort === 'left' ? -32 : 0));
-          const snapY = other.y + (targetPort === 'bottom' ? 32 : (targetPort === 'top' ? -32 : 0));
+      if (sourceSide) {
           const dotDist = Math.sqrt(Math.pow(snapX - dragNode.x, 2) + Math.pow(snapY - dragNode.y, 2));
-
           ghosts.push({ 
             id: 'ghost',
-            sourceId: other.instanceId, sourceSide: targetPort, targetId: dId, targetSide: sourcePort,
-            color, displayColor: color, snapX, snapY,
+            sourceId: other.instanceId, 
+            sourceSide: sourceSide, 
+            targetId: dId, 
+            targetSide: 'top', // All paths map to Top (Blue) input
+            color, 
+            displayColor: color, 
+            snapX, 
+            snapY,
             dotDistance: dotDist 
           } as any);
       }
@@ -416,7 +428,6 @@ export default function App() {
                 
                 {/* PASS 1: Child Ports (Inputs - Blue) */}
                 {canvasItems.map(item => {
-                  const involvesRecursion = draggingId && isDescendantOf(item.instanceId, draggingId, connRef.current);
                   return (
                     <div key={`latch_inputs_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1001]' : 'z-20'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type === 'input').map(lp => {
