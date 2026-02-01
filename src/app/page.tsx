@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Trash2, X } from 'lucide-react';
+import { Trash2, X, LayoutGrid, Waypoints } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
@@ -85,6 +85,77 @@ export default function App() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  const gatherLayout = (mode: 'grid' | 'tether') => {
+    setCanvasItems(prev => {
+      const newItems = prev.map(item => ({ ...item }));
+      const origin = newItems.find(i => i.isOrigin);
+      if (!origin) return prev;
+
+      const visited = new Set<string>();
+      const occupied = new Set<string>();
+      
+      const step = mode === 'grid' ? 32 : 96;
+
+      // Start origin
+      visited.add(origin.instanceId);
+      occupied.add(`${origin.x},${origin.y}`);
+
+      const processNode = (nodeId: string, cx: number, cy: number) => {
+        const children = connections.filter(c => c.sourceId === nodeId);
+        
+        children.forEach(conn => {
+          if (visited.has(conn.targetId)) return;
+
+          let tx = cx;
+          let ty = cy;
+
+          if (conn.sourceSide === 'bottom') ty += step;
+          else if (conn.sourceSide === 'right') tx += step;
+          else if (conn.sourceSide === 'left') tx -= step;
+          else if (conn.sourceSide === 'top') ty -= step;
+
+          // Resolve collisions
+          let safety = 0;
+          while (occupied.has(`${tx},${ty}`) && safety < 20) {
+            // Push slightly out if collision
+            if (conn.sourceSide === 'bottom' || conn.sourceSide === 'top') tx += 32;
+            else ty += 32;
+            safety++;
+          }
+
+          const target = newItems.find(i => i.instanceId === conn.targetId);
+          if (target) {
+            target.x = tx;
+            target.y = ty;
+            visited.add(target.instanceId);
+            occupied.add(`${tx},${ty}`);
+            processNode(target.instanceId, tx, ty);
+          }
+        });
+      };
+
+      processNode(origin.instanceId, origin.x, origin.y);
+      
+      // Secondary pass for unattached nodes or extra inputs
+      newItems.forEach(item => {
+        if (!visited.has(item.instanceId)) {
+          const outgoing = connections.find(c => c.sourceId === item.instanceId && visited.has(c.targetId));
+          if (outgoing) {
+            const target = newItems.find(i => i.instanceId === outgoing.targetId);
+            if (target) {
+              item.x = target.x;
+              item.y = target.y - 32;
+              visited.add(item.instanceId);
+              occupied.add(`${item.x},${item.y}`);
+            }
+          }
+        }
+      });
+
+      return newItems;
+    });
+  };
 
   const isAncestor = (ancId: string, descId: string): boolean => {
     let curr = descId;
@@ -382,6 +453,24 @@ export default function App() {
                }} 
             />
 
+            {/* Permanent Layout Toggles */}
+            <div className="fixed top-20 right-8 z-[100] flex flex-col gap-2">
+              <div 
+                onClick={() => gatherLayout('grid')} 
+                title="Crossword / Grid View"
+                className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all group"
+              >
+                <LayoutGrid size={16} className="text-slate-400 group-hover:text-primary transition-colors" />
+              </div>
+              <div 
+                onClick={() => gatherLayout('tether')} 
+                title="Tether / Spread View"
+                className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 active:scale-95 transition-all group"
+              >
+                <Waypoints size={16} className="text-slate-400 group-hover:text-primary transition-colors" />
+              </div>
+            </div>
+
             <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className="w-full h-full relative">
                 <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-visible">
                     {connections.map(conn => {
@@ -434,7 +523,7 @@ export default function App() {
 
                 {canvasItems.map(item => (
                   <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
-                    className={`absolute cursor-pointer group transition-transform duration-200 ${isDragging && draggingId === item.instanceId ? 'scale-110 z-[1000]' : 'z-10'} flex items-center justify-center`} 
+                    className={`absolute cursor-pointer group transition-all duration-300 ${isDragging && draggingId === item.instanceId ? 'scale-110 z-[1000]' : 'z-10'} flex items-center justify-center`} 
                     style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                     <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border transition-all 
                       ${item.isOrigin ? 'border-blue-400 ring-1 ring-blue-50 shadow-blue-100' : (item.isRegistered ? 'border-slate-200 shadow-slate-100' : 'border-emerald-300 ring-1 ring-emerald-50 shadow-emerald-50')}
@@ -480,7 +569,6 @@ export default function App() {
                     )
                 })}
 
-                {/* PASS 1: Child Ports (Inputs - Blue) - Hides on fusion (EXCEPT RECURSION) */}
                 {canvasItems.map(item => (
                     <div key={`latch_inputs_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1001]' : 'z-20'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type === 'input').map(lp => {
@@ -499,7 +587,6 @@ export default function App() {
 
                           const isConnected = !!incomingLink;
                           const isGuidance = !!ghost || activeTether?.targetId === item.instanceId;
-                          // Input dot disappears if fused (non-recursive)
                           const isVisible = (isGuidance || isConnected) && !isFused;
                           const c = isRecursive ? 'bg-blue-500' : (lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300');
                           return (
@@ -514,7 +601,6 @@ export default function App() {
                     </div>
                 ))}
 
-                {/* PASS 2: Parent Ports (Outputs - Green, Red, Yellow, Fuchsia) - Always stays visible if active */}
                 {canvasItems.map(item => (
                     <div key={`latch_parents_${item.instanceId}`} className={`absolute pointer-events-none ${draggingId === item.instanceId ? 'z-[1002]' : 'z-21'}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
                         {LATCH_POINTS.filter(lp => lp.type !== 'input').map(lp => {
@@ -523,10 +609,8 @@ export default function App() {
                           
                           const isConnected = !!outgoingLink;
                           const isGuidance = !!ghost || activeTether?.sourceId === item.instanceId;
-                          // Parent dots ALWAYS stay visible if connected or guidance exists
                           const isVisible = (isGuidance || isConnected);
                           
-                          // Dynamic color based on actual connection or ghost status
                           const activeColor = outgoingLink ? outgoingLink.color : (ghost ? ghost.color : lp.color);
                           const c = activeColor.includes('rose') ? 'bg-rose-500' : 
                                     activeColor.includes('emerald') ? 'bg-emerald-500' : 
