@@ -109,7 +109,9 @@ export default function App() {
       const visited = new Set<string>();
       const occupied = new Set<string>();
       
-      const step = mode === 'grid' ? 32 : 96;
+      const GRID_STEP = 32;
+      const TETHER_STEP = 128; // Distance used to break into a new group
+      const step = mode === 'grid' ? GRID_STEP : 96;
 
       // Start origin
       visited.add(origin.instanceId);
@@ -129,12 +131,26 @@ export default function App() {
           else if (conn.sourceSide === 'left') tx -= step;
           else if (conn.sourceSide === 'top') ty -= step;
 
-          // Resolve collisions
-          let safety = 0;
-          while (occupied.has(`${tx},${ty}`) && safety < 20) {
-            if (conn.sourceSide === 'bottom' || conn.sourceSide === 'top') tx += 32;
-            else ty += 32;
-            safety++;
+          // Resolve collisions: If spot is taken in Grid mode, push to tether distance
+          if (mode === 'grid' && occupied.has(`${tx},${ty}`)) {
+            let searchDist = TETHER_STEP;
+            let found = false;
+            let safety = 0;
+            while (!found && safety < 10) {
+              let nx = cx, ny = cy;
+              if (conn.sourceSide === 'bottom') ny += searchDist;
+              else if (conn.sourceSide === 'right') nx += searchDist;
+              else if (conn.sourceSide === 'left') nx -= searchDist;
+              else if (conn.sourceSide === 'top') ny -= searchDist;
+              
+              if (!occupied.has(`${nx},${ny}`)) {
+                tx = nx; ty = ny;
+                found = true;
+              } else {
+                searchDist += GRID_STEP;
+              }
+              safety++;
+            }
           }
 
           const target = newItems.find(i => i.instanceId === conn.targetId);
@@ -595,7 +611,10 @@ export default function App() {
                           const isConnected = !!incomingLink;
                           const isGuidance = !!ghost || activeTether?.targetId === item.instanceId;
                           const isVisible = (isGuidance || isConnected) && !isFused;
-                          const c = isRecursive ? 'bg-blue-500' : (lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300');
+
+                          const isIsolated = incomingLink?.color.includes('fuchsia');
+                          const c = isRecursive ? 'bg-blue-500' : (isIsolated && isFused ? 'bg-indigo-500' : (lp.color.includes('blue') ? 'bg-blue-500' : 'bg-slate-300'));
+                          
                           return (
                             <div key={lp.id} className={`absolute w-3 h-3 rounded-full transition-all duration-300 border-2 border-white pointer-events-none shadow-sm z-[2000]
                                     ${isConnected ? c : 'bg-slate-300'}
