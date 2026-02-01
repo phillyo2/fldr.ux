@@ -263,13 +263,18 @@ export default function App() {
                 if (visited.has(conn.targetId)) return;
                 let tx = cx, ty = cy;
                 
-                // Identify if this is an execution flow (Blue, Emerald, or Rose)
-                // These must "unsnap" in grid mode to ensure lines (recursion or input) are visible.
-                const isExecution = !conn.color.includes('amber');
+                // TARGETED UNSNAP: Only unsnap if the target tile is actively performing recursion (pointing to an ancestor)
+                const targetNodeId = conn.targetId;
+                const isPerformingRecursion = connections.some(c => 
+                    c.sourceId === targetNodeId && 
+                    isAncestor(c.targetId, targetNodeId, connections)
+                );
                 
-                let step = (mode === 'grid') ? GRID_SIZE : GRID_SIZE * 2;
-                if (mode === 'grid' && conn.sourceSide === 'bottom' && isExecution) {
-                    step = GRID_SIZE * 2; // Enforce visibility stride
+                let step = GRID_SIZE;
+                if (mode === 'tether') {
+                    step = GRID_SIZE * 2;
+                } else if (mode === 'grid' && isPerformingRecursion) {
+                    step = GRID_SIZE * 2; // Create breathing room specifically for recursion entry/exit
                 }
 
                 if (conn.sourceSide === 'bottom') ty += step;
@@ -440,9 +445,11 @@ export default function App() {
                           const dist = Math.sqrt(Math.pow(sX - tX, 2) + Math.pow(sY - tY, 2));
                           const isFuchsia = conn.color.includes('fuchsia');
                           const isEmerald = conn.color.includes('emerald');
+                          const isRose = conn.color.includes('rose');
                           
-                          // Hide line if items are directly adjacent, UNLESS they are execution-critical (Emerald/Fuchsia)
-                          if (!isFuchsia && !isEmerald && dist < 48) return null;
+                          // Persistent Lines: Emerald, Fuchsia, and Rose execution flows always show even when adjacent
+                          const isPersistent = isFuchsia || isEmerald || isRose;
+                          if (!isPersistent && dist < 48) return null;
 
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
                           let strokeColor = '#3B82F6'; 
