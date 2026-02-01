@@ -2,15 +2,15 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings } from 'lucide-react';
+import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
   CanvasItem, Connection, FolderData, FolderItem 
 } from '@/lib/types';
 import { 
-  HEADER_OFFSET, LATCH_POINTS, SNAP_TOLERANCE, DETECTION_RANGE, TETHER_DELAY, 
-  UNIT_SIZE_VAL, DRAG_THRESHOLD, LONG_PRESS_MS, SELECTABLE_ICONS 
+  HEADER_OFFSET, SNAP_TOLERANCE, DETECTION_RANGE, TETHER_DELAY, 
+  DRAG_THRESHOLD, LONG_PRESS_MS, SELECTABLE_ICONS, LATCH_POINTS 
 } from '@/lib/constants';
 import { getSmartPath, snapToGrid } from '@/lib/pathing';
 
@@ -76,8 +76,6 @@ export default function App() {
   const [studioName, setStudioName] = useState("");
   const [studioIcon, setStudioIcon] = useState("Terminal");
   const [studioPayload, setStudioPayload] = useState("");
-  const [studioLogic, setStudioLogic] = useState("");
-  const [studioSetup, setStudioSetup] = useState("");
 
   useEffect(() => {
     const w = window.innerWidth;
@@ -92,6 +90,10 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const deleteConnection = (id: string) => {
+    setConnections(prev => prev.filter(c => c.id !== id));
+  };
+
   const gatherLayout = (mode: 'grid' | 'tether') => {
     setCanvasItems(prev => {
       const newItems = prev.map(item => ({ ...item }));
@@ -99,27 +101,33 @@ export default function App() {
       if (!origin) return prev;
       const visited = new Set<string>();
       const occupied = new Set<string>();
-      const step = mode === 'grid' ? 32 : 64;
+      const step = 32;
+      const minGap = mode === 'tether' ? 32 : 0;
+      
       const isPositionOccupied = (x: number, y: number) => {
-        if (mode === 'grid') return occupied.has(`${x},${y}`);
-        for (let dx = -32; dx <= 32; dx += 32) {
-          for (let dy = -32; dy <= 32; dy += 32) if (occupied.has(`${x + dx},${y + dy}`)) return true;
+        const threshold = minGap + 1;
+        for (const pos of occupied) {
+          const [ox, oy] = pos.split(',').map(Number);
+          if (Math.abs(ox - x) < threshold && Math.abs(oy - y) < threshold) return true;
         }
         return false;
       };
+
       visited.add(origin.instanceId);
       occupied.add(`${origin.x},${origin.y}`);
+      
       const processNode = (nodeId: string, cx: number, cy: number) => {
         const children = connections.filter(c => c.sourceId === nodeId);
         children.forEach(conn => {
           if (visited.has(conn.targetId)) return;
-          let found = false, safety = 0, searchDist = step, tx = cx, ty = cy;
+          let found = false, safety = 0, searchDist = step + minGap, tx = cx, ty = cy;
           while (!found && safety < 15) {
             let nextX = cx, nextY = cy;
             if (conn.sourceSide === 'bottom') nextY += searchDist;
             else if (conn.sourceSide === 'right') nextX += searchDist;
             else if (conn.sourceSide === 'left') nextX -= searchDist;
             else if (conn.sourceSide === 'top') nextY -= searchDist;
+            
             if (!isPositionOccupied(nextX, nextY)) { tx = nextX; ty = nextY; found = true; } else { searchDist += 32; }
             safety++;
           }
@@ -127,7 +135,9 @@ export default function App() {
           if (target) { target.x = tx; target.y = ty; visited.add(target.instanceId); occupied.add(`${tx},${ty}`); processNode(target.instanceId, tx, ty); }
         });
       };
+      
       processNode(origin.instanceId, origin.x, origin.y);
+
       newItems.forEach(item => {
         if (!visited.has(item.instanceId)) {
           const outgoing = connections.find(c => c.sourceId === item.instanceId && visited.has(c.targetId));
@@ -135,8 +145,7 @@ export default function App() {
             const target = newItems.find(i => i.instanceId === outgoing.targetId);
             if (target) {
               item.x = target.x;
-              const isIsolatedInput = outgoing.color.includes('fuchsia');
-              const verticalOffset = (mode === 'tether' && isIsolatedInput) ? 64 : 32;
+              const verticalOffset = outgoing.color.includes('fuchsia') ? 64 : (32 + minGap);
               let finalY = target.y - verticalOffset, safety = 0;
               while (isPositionOccupied(item.x, finalY) && safety < 10) { finalY -= 32; safety++; }
               item.y = finalY; visited.add(item.instanceId); occupied.add(`${item.x},${item.y}`);
@@ -158,8 +167,6 @@ export default function App() {
     return false;
   };
 
-  const isExtraInput = (id: string): boolean => connRef.current.some(c => c.sourceId === id && c.color.includes('fuchsia'));
-
   const getTreeId = (id: string): string | null => {
     let curr = id; const visited = new Set<string>(); let safety = 0;
     while (curr && safety < 100) {
@@ -167,7 +174,7 @@ export default function App() {
       const node = itemsRef.current.find(i => i.instanceId === curr); if (!node) return null;
       if (node.isOrigin) return 'MAIN';
       const incoming = connRef.current.find(c => c.targetId === curr && !c.color.includes('fuchsia'));
-      if (!incoming) return null; if (incoming.sourceSide === 'left') return curr;
+      if (!incoming) return null;
       curr = incoming.sourceId; safety++;
     }
     return null;
@@ -188,24 +195,25 @@ export default function App() {
   const calculateGhostHandshakes = (items: CanvasItem[], dId: string, dPos: {x: number, y: number} | null = null) => {
     if (activeTether) return []; const ghosts: Connection[] = [];
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
-    if (!dragNode) return ghosts; if (isExtraInput(dId)) return [];
+    if (!dragNode) return ghosts;
     const dragTreeId = getTreeId(dId);
+    
     items.forEach(other => {
-      if (other.instanceId === dId || isExtraInput(other.instanceId)) return;
+      if (other.instanceId === dId) return;
       const otherTreeId = getTreeId(other.instanceId); const dx = (dragNode.x || 0) - other.x;
       const dy = (dragNode.y || 0) - other.y; const adx = Math.abs(dx); const ady = Math.abs(dy);
       const isSameTree = (dragTreeId !== null && otherTreeId !== null && dragTreeId === otherTreeId);
       const isUnattachedToCanvas = (otherTreeId !== null && dragTreeId === null);
+      
       if (isSameTree || isUnattachedToCanvas) {
-        if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', displayColor: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any); } 
-        else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any); } 
-        else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) { if (dragTreeId === null) ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', displayColor: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any); }
+        const isBottomOccupied = connections.some(c => c.sourceId === other.instanceId && c.sourceSide === 'bottom');
+        const isRightOccupied = connections.some(c => c.sourceId === other.instanceId && c.sourceSide === 'right');
+        const isLeftOccupied = connections.some(c => c.sourceId === other.instanceId && c.sourceSide === 'left');
+
+        if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE && !isBottomOccupied) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-rose-500', displayColor: 'bg-rose-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any); } 
+        else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE && !isRightOccupied) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', displayColor: 'bg-emerald-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any); } 
+        else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE && !isLeftOccupied) { ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-fuchsia-500', displayColor: 'bg-fuchsia-500', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any); }
       }
-      if (isSameTree && isAncestor(other.instanceId, dId)) {
-        if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) { ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any); }
-        else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) { ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'right', targetId: other.instanceId, targetSide: 'top', color: 'bg-blue-500', displayColor: 'bg-blue-500', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any); }
-      }
-      if (isUnattachedToCanvas && dragTreeId === null) { if (dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) ghosts.push({ id: 'ghost', sourceId: dId, sourceSide: 'bottom', targetId: other.instanceId, targetSide: 'top', color: 'bg-fuchsia-500', displayColor: 'bg-fuchsia-500', snapX: other.x, snapY: other.y - 32, dotDistance: Math.sqrt(adx**2 + (Math.abs(dy)-32)**2) } as any); }
     });
     if (ghosts.length === 0) return []; ghosts.sort((a: any, b: any) => a.dotDistance - b.dotDistance); return [ghosts[0]];
   };
@@ -239,22 +247,17 @@ export default function App() {
     if (pressTimer.current) {
       clearTimeout(pressTimer.current);
       if (!isDragging && !isPanning) {
-        if (item.isRegistered) { /* open properties */ } else {
+        if (!item.isRegistered) {
            setEditingItem(item); setStudioName(item.name || ""); setStudioIcon(item.icon || "Terminal");
-           setStudioPayload(""); setStudioLogic(""); setStudioSetup(""); setIsStudioOpen(true);
+           setStudioPayload(""); setIsStudioOpen(true);
         }
       }
     }
   };
 
   const handleFolderSelect = (item: FolderItem) => {
-    if (item.id) {
-      setCurrentPageId(item.id);
-      setActiveFolderView(null);
-    } else if (item.isBuilder || !item.isFolder) {
-      handleSmartBirth(item);
-      setActiveFolderView(null);
-    }
+    if (item.id) { setCurrentPageId(item.id); setActiveFolderView(null); } 
+    else { handleSmartBirth(item); setActiveFolderView(null); }
   };
 
   useEffect(() => {
@@ -269,7 +272,6 @@ export default function App() {
       if (isPanning) {
         const dx = clientX - panStart.current.x;
         const dy = clientY - panStart.current.y;
-        // Lock horizontal scroll on homepage
         const finalX = currentPageId === 'home' ? panOffsetStart.current.x : panOffsetStart.current.x + dx;
         setViewOffset({ x: finalX, y: panOffsetStart.current.y + dy });
         return;
@@ -291,8 +293,6 @@ export default function App() {
       if (isPanning) { setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); setIsPanning(false); return; }
       if (tetherTimer.current) { clearTimeout(tetherTimer.current); tetherTimer.current = null; }
       if (!isDragging) return; 
-      const droppedItem = itemsRef.current.find(i => i.instanceId === draggingId);
-      if (!droppedItem) return; 
       setCanvasItems(prev => {
         const item = prev.find(i => i.instanceId === draggingId); if (!item) return prev;
         let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
@@ -339,15 +339,35 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems);
-                          const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : '#FBBF24';
-                          return <path key={conn.id} d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" />;
+                          const c = conn.color.includes('rose') ? '#F43F5E' : conn.color.includes('emerald') ? '#10B981' : conn.color.includes('blue') ? '#3B82F6' : conn.color.includes('fuchsia') ? '#D946EF' : '#FBBF24';
+                          return (
+                            <React.Fragment key={conn.id}>
+                              <path d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeLinecap="round" />
+                              <circle 
+                                cx={pathData.mid.x} cy={pathData.mid.y} r="10" 
+                                fill="white" stroke={c} strokeWidth="2" 
+                                className="pointer-events-auto cursor-pointer hover:scale-125 transition-transform" 
+                                onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }}
+                              />
+                              <X x={pathData.mid.x - 4} y={pathData.mid.y - 4} size={8} stroke={c} strokeWidth={3} className="pointer-events-none" />
+                            </React.Fragment>
+                          );
                       })}
                   </svg>
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
-                      className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'scale-110 z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                      <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border ${item.isOrigin ? 'border-blue-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
+                      className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                      <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-blue-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
                         <SafeIcon name={item.icon} size={16} className={item.isRegistered ? (mainNodes.has(item.instanceId) ? 'text-slate-800' : 'text-slate-400') : 'text-emerald-500'} />
+                        
+                        {/* Anchor Dots */}
+                        {LATCH_POINTS.map(lp => {
+                          const hasConn = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
+                          const dotColor = hasConn ? (lp.id === 'right' ? 'bg-emerald-500' : lp.id === 'bottom' ? 'bg-rose-500' : lp.id === 'left' ? 'bg-fuchsia-500' : 'bg-blue-500') : 'bg-slate-200';
+                          return (
+                            <div key={lp.id} className={`absolute w-2 h-2 rounded-full border border-white shadow-sm ${dotColor}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} />
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -365,38 +385,15 @@ export default function App() {
         </div>
       </main>
 
-      {/* Grid-Locked Folders */}
       <div className="fixed bottom-8 left-8 z-[500]">
-        <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20">
-          <Folder size={16} className="text-white" />
-        </div>
+        <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20"><Folder size={16} className="text-white" /></div>
       </div>
-
       <div className="fixed bottom-8 right-8 z-[500]">
-        <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20">
-          <SafeIcon name="Compass" size={16} className="text-white" />
-        </div>
+        <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20"><SafeIcon name="Compass" size={16} className="text-white" /></div>
       </div>
 
-      <AndroidFolder 
-        title={navData.title} 
-        icon={navData.icon} 
-        color={navData.color} 
-        items={navData.items} 
-        isOpen={activeFolderView === 'nav'} 
-        onClose={() => setActiveFolderView(null)} 
-        onSelect={handleFolderSelect} 
-      />
-
-      <AndroidFolder 
-        title={toolboxData.title} 
-        icon={toolboxData.icon} 
-        color={toolboxData.color} 
-        items={toolboxData.items} 
-        isOpen={activeFolderView === 'toolbox'} 
-        onClose={() => setActiveFolderView(null)} 
-        onSelect={handleFolderSelect} 
-      />
+      <AndroidFolder title={navData.title} icon={navData.icon} color={navData.color} items={navData.items} isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
+      <AndroidFolder title={toolboxData.title} icon={toolboxData.icon} color={toolboxData.color} items={toolboxData.items} isOpen={activeFolderView === 'toolbox'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
 
       {isStudioOpen && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
@@ -411,12 +408,15 @@ export default function App() {
               </div>
               <textarea value={studioPayload} onChange={e => setStudioPayload(e.target.value)} className="w-full h-28 bg-slate-900 text-emerald-400 p-4 rounded-xl font-mono text-[10px] resize-none border border-white/10 outline-none" placeholder="Payload Schema" />
             </div>
-            <div className="flex gap-4"><button onClick={() => setIsStudioOpen(false)} className="flex-1 py-5 bg-slate-100 text-slate-400 font-black uppercase text-xs rounded-3xl">Cancel</button><button onClick={() => {
+            <div className="flex gap-4">
+              <button onClick={() => setIsStudioOpen(false)} className="flex-1 py-5 bg-slate-100 text-slate-400 font-black uppercase text-xs rounded-3xl">Cancel</button>
+              <button onClick={() => {
                 if (!editingItem) return;
                 const dna = { name: studioName, icon: studioIcon, payload: studioPayload, isRegistered: true };
                 setCanvasItems(prev => prev.map(i => i.instanceId === editingItem.instanceId ? { ...i, ...dna } : i));
                 setIsStudioOpen(false); setEditingItem(null);
-            }} className="flex-1 py-5 bg-slate-900 text-white font-black uppercase text-xs rounded-3xl">Initialize</button></div>
+              }} className="flex-1 py-5 bg-slate-900 text-white font-black uppercase text-xs rounded-3xl">Initialize</button>
+            </div>
           </div>
         </div>
       )}
