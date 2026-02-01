@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal } from 'lucide-react';
+import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
@@ -10,7 +10,7 @@ import {
 } from '@/lib/types';
 import { 
   HEADER_OFFSET, SNAP_TOLERANCE, DETECTION_RANGE, TETHER_DELAY, 
-  DRAG_THRESHOLD, LONG_PRESS_MS, SELECTABLE_ICONS, LATCH_POINTS 
+  DRAG_THRESHOLD, LONG_PRESS_MS, SELECTABLE_ICONS, LATCH_POINTS, GRID_SIZE 
 } from '@/lib/constants';
 import { getSmartPath, snapToGrid } from '@/lib/pathing';
 
@@ -44,7 +44,9 @@ export default function App() {
       { name: 'New Action', icon: 'Plus', isBuilder: true },
       { name: 'Actions', icon: 'Zap', isFolder: true, items: [] },
       { name: 'Triggers', icon: 'Radio', isFolder: true, items: [] },
-      { name: 'Logic', icon: 'Code2', isFolder: true, items: [] }
+      { name: 'Logic', icon: 'Code2', isFolder: true, items: [
+        { name: 'Circuit Breaker', icon: 'Shuffle', isBuilder: true }
+      ] }
     ]
   };
 
@@ -94,6 +96,20 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
+  const isNodeInTree = (nodeId: string): boolean => {
+    const visited = new Set<string>();
+    const stack = ['entry_origin'];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (current === nodeId) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const outgoing = connections.filter(c => c.sourceId === current);
+      outgoing.forEach(c => stack.push(c.targetId));
+    }
+    return false;
+  };
+
   const isAncestor = (ancId: string, descId: string): boolean => {
     let curr = descId; const visited = new Set<string>();
     while (curr) {
@@ -132,9 +148,8 @@ export default function App() {
           if (visited.has(conn.targetId)) return;
           let found = false, safety = 0, searchDist = step + minGap, tx = cx, ty = cy;
           
-          // Special placement for isolated inputs (fuchsia) sitting one cell block above
           if (conn.color.includes('fuchsia')) {
-            tx = cx; ty = cy - (32 + minGap);
+            tx = cx; ty = cy - (32 + minGap); // Sit exactly one cell block above
           } else {
             while (!found && safety < 15) {
               let nextX = cx, nextY = cy;
@@ -162,25 +177,35 @@ export default function App() {
     const dragNode = dPos ? { ...items.find(i => i.instanceId === dId), ...dPos } : items.find(i => i.instanceId === dId);
     if (!dragNode) return ghosts;
     
+    const dragInTree = isNodeInTree(dId);
+
     items.forEach(other => {
       if (other.instanceId === dId) return;
+      const otherInTree = isNodeInTree(other.instanceId);
       const dx = (dragNode.x || 0) - other.x;
       const dy = (dragNode.y || 0) - other.y;
       const adx = Math.abs(dx); const ady = Math.abs(dy);
       
       const isAncestorNode = isAncestor(dId, other.instanceId);
+      const isFuchsia = (dragInTree && !otherInTree) || (!dragInTree && otherInTree);
 
-      // Down (Green) -> Top (Blue)
+      // Bottom (Green/Success) -> Top (Blue/Input)
       if (dy > 0 && dy < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
-        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
+        if (!connections.find(c => c.sourceId === other.instanceId && c.sourceSide === 'bottom')) {
+           ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'bottom', targetId: dId, targetSide: 'top', color: isFuchsia ? 'bg-fuchsia-500' : 'bg-emerald-500', snapX: other.x, snapY: other.y + 32, dotDistance: Math.sqrt(adx**2 + (dy-32)**2) } as any);
+        }
       }
-      // Right (Red) -> Top (Blue)
+      // Right (Red/Error) -> Top (Blue/Input)
       else if (dx > 0 && dx < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
+        if (!connections.find(c => c.sourceId === other.instanceId && c.sourceSide === 'right')) {
+           ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'right', targetId: dId, targetSide: 'top', color: isFuchsia ? 'bg-fuchsia-500' : 'bg-rose-500', snapX: other.x + 32, snapY: other.y, dotDistance: Math.sqrt((dx-32)**2 + ady**2) } as any);
+        }
       }
-      // Left (Yellow) -> Top (Blue)
+      // Left (Yellow/Parallel) -> Top (Blue/Input)
       else if (dx < 0 && Math.abs(dx) < DETECTION_RANGE && ady < SNAP_TOLERANCE) {
-        ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+        if (!connections.find(c => c.sourceId === other.instanceId && c.sourceSide === 'left')) {
+           ghosts.push({ id: 'ghost', sourceId: other.instanceId, sourceSide: 'left', targetId: dId, targetSide: 'top', color: isFuchsia ? 'bg-fuchsia-500' : 'bg-amber-400', snapX: other.x - 32, snapY: other.y, dotDistance: Math.sqrt((Math.abs(dx)-32)**2 + ady**2) } as any);
+        }
       }
       // Top (Blue/Recursion) -> Any exit
       else if (isAncestorNode && dy < 0 && Math.abs(dy) < DETECTION_RANGE && adx < SNAP_TOLERANCE) {
@@ -328,23 +353,26 @@ export default function App() {
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = activeTether.snapX!, tY = activeTether.snapY! - HEADER_OFFSET;
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems);
-                          const c = activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('amber') ? '#FBBF24' : '#3B82F6';
+                          const c = activeTether.color.includes('emerald') ? '#10B981' : activeTether.color.includes('rose') ? '#F43F5E' : activeTether.color.includes('amber') ? '#FBBF24' : activeTether.color.includes('blue') ? '#3B82F6' : '#D946EF';
                           return <path d={pathData.d} stroke={c} strokeWidth="3" fill="none" strokeDasharray="6,4" className="opacity-50" />;
                       })()}
                   </svg>
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)}
                       className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : (isReady ? 'transition-all duration-300' : '')} z-10`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
+                      {item.name === 'Circuit Breaker' && <div className="absolute inset-0 translate-x-1 translate-y-1 bg-slate-200 rounded-md -z-10" />}
                       <div className={`w-[30px] h-[30px] bg-white rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-blue-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
                         <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />
                         
-                        {/* 8px Anchor Dots with Dynamic Status Glow */}
                         {LATCH_POINTS.map(lp => {
                           const connected = connections.find(c => (c.sourceId === item.instanceId && c.sourceSide === lp.id) || (c.targetId === item.instanceId && c.targetSide === lp.id));
-                          const isOutput = lp.id !== 'top';
-                          const dotColor = connected 
-                            ? (isOutput ? lp.color : 'bg-blue-500') 
-                            : 'bg-slate-200';
+                          let dotColor = 'bg-slate-200';
+                          if (connected) {
+                            if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
+                            else if (lp.id === 'right') dotColor = 'bg-rose-500';
+                            else if (lp.id === 'left') dotColor = 'bg-amber-400';
+                            else dotColor = 'bg-blue-500';
+                          }
                           
                           return (
                             <div key={lp.id} className={`absolute w-2 h-2 rounded-full border border-white shadow-sm transition-colors ${dotColor}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)' }} />
