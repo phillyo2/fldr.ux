@@ -378,7 +378,7 @@ export default function App() {
       
       if (isPanning) {
         const dx = clientX - panStart.current.x;
-        const dy = clientY - panStart.current.y;
+        const dy = clientY - parent.current ? (clientY - panStart.current.y) : 0;
         setViewOffset({ x: panOffsetStart.current.x + dx, y: panOffsetStart.current.y + dy });
         return;
       }
@@ -424,7 +424,7 @@ export default function App() {
     };
 
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
+    window.addEventListener('touchmove', handleMove); window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
   }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, currentPageId, zoom, windowSize]); 
 
@@ -501,12 +501,24 @@ export default function App() {
                           if (connectedAsSource || connectedAsTarget || tethered) {
                             opacityClass = 'opacity-100 scale-100';
 
-                            // Proximity-Based Dot Culling: Hide input dot if snapped directly to parent anchor
-                            if (lp.id === 'top' && (connectedAsTarget || (activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top'))) {
-                              const parentId = connectedAsTarget ? connectedAsTarget.sourceId : activeTether?.sourceId;
-                              const parent = canvasItems.find(i => i.instanceId === parentId);
-                              if (parent && Math.abs(parent.x - item.x) < 1 && Math.abs((parent.y + 32) - item.y) < 1) {
-                                opacityClass = 'opacity-0 scale-50';
+                            // Proximity-Based Dot Culling: Hide dot if snapped directly to its counterpart anchor
+                            const connection = connectedAsSource || connectedAsTarget || (tethered ? activeTether : null);
+                            if (connection) {
+                              const isSource = (connection.sourceId === item.instanceId && connection.sourceSide === lp.id);
+                              const otherId = isSource ? connection.targetId : connection.sourceId;
+                              const otherSide = isSource ? connection.targetSide : connection.sourceSide;
+                              const otherItem = canvasItems.find(i => i.instanceId === otherId);
+                              const otherLp = LATCH_POINTS.find(p => p.id === otherSide);
+
+                              if (otherItem && otherLp) {
+                                const myX = item.x + lp.x * 32;
+                                const myY = item.y + lp.y * 32;
+                                const itsX = otherItem.x + otherLp.x * 32;
+                                const itsY = otherItem.y + otherLp.y * 32;
+
+                                if (Math.abs(myX - itsX) < 1 && Math.abs(myY - itsY) < 1) {
+                                  opacityClass = 'opacity-0 scale-50';
+                                }
                               }
                             }
 
