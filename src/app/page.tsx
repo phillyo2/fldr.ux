@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { LayoutGrid, Waypoints, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft, LayoutTemplate, Home, Shuffle, Shield, Activity, Globe, Bell, Send, Cpu, Layers, Clock, HardDrive, GitBranch, Timer, Repeat } from 'lucide-react';
+import { LayoutGrid, Waypoints, Folder, Plus, Minus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft, LayoutTemplate, Home, Shuffle, Shield, Activity, Globe, Bell, Send, Cpu, Layers, Clock, HardDrive, GitBranch, Timer, Repeat } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
 import { 
@@ -341,6 +341,9 @@ export default function App() {
     else { handleSmartBirth(item); setActiveFolderView(null); }
   };
 
+  const handleZoomIn = () => setZoom(prev => Math.min(2, prev + 0.1));
+  const handleZoomOut = () => setZoom(prev => Math.max(0.5, prev - 0.1));
+
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = 'clientX' in e ? e.clientX : (e as TouchEvent).touches[0].clientX;
@@ -504,20 +507,24 @@ export default function App() {
         </div>
       </main>
 
-      <div className="fixed top-8 right-8 z-[1000] flex items-center gap-4 bg-white/50 backdrop-blur-sm p-3 rounded-xl border border-white/20 shadow-sm">
-         <input type="range" min="0.5" max="2" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-24 h-1 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+      {/* Top Right Cluster: Gather Layout Controls */}
+      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-3">
+         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-10 h-10 bg-white/80 backdrop-blur-md border border-slate-200 rounded-xl shadow-lg flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><LayoutGrid size={20} className="text-slate-600" /></div>
+         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-10 h-10 bg-white/80 backdrop-blur-md border border-slate-200 rounded-xl shadow-lg flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><Waypoints size={20} className="text-slate-600" /></div>
+      </div>
+
+      {/* Center Right Zoom Controls */}
+      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col gap-4">
+         <button onClick={handleZoomIn} title="Zoom In" className="w-12 h-12 bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><Plus size={24} className="text-slate-700" /></button>
+         <button onClick={handleZoomOut} title="Zoom Out" className="w-12 h-12 bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><Minus size={24} className="text-slate-700" /></button>
       </div>
 
       <div className="fixed bottom-8 left-8 z-[500] flex flex-col gap-2">
-         <div className="flex gap-2">
-           <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><LayoutGrid size={16} className="text-slate-400" /></div>
-           <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all"><Waypoints size={16} className="text-slate-400" /></div>
-         </div>
-         <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20 mt-2"><Folder size={16} className="text-white" /></div>
+         <div onClick={() => setActiveFolderView('toolbox')} className="w-10 h-10 bg-slate-900 rounded-xl shadow-2xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20 mt-2"><Folder size={20} className="text-white" /></div>
       </div>
       
       <div className="fixed bottom-8 right-8 z-[500]">
-        <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-lg shadow-xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20"><Compass size={16} className="text-white" /></div>
+        <div onClick={() => setActiveFolderView('nav')} className="w-10 h-10 bg-blue-600 rounded-xl shadow-2xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20"><Compass size={20} className="text-white" /></div>
       </div>
 
       <AndroidFolder title={navData.title} icon={navData.icon} color={navData.color} items={navData.items} isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
