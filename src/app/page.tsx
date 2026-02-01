@@ -164,7 +164,11 @@ export default function App() {
           }
           // Standard Execution Tree Flow
           else if (dragCtx && !otherCtx && lSource.id !== 'top') {
-             valid = true;
+             // Isolation Check: If 'other' is already a fuchsia provider, it must stay isolated
+             const isFuchsiaProvider = connRef.current.some(c => c.sourceId === other.instanceId && c.color.includes('fuchsia'));
+             if (!isFuchsiaProvider) {
+               valid = true;
+             }
           }
           // Recursion: Descendant (Green/Red) -> Ancestor (Top/Blue)
           else if (dragCtx && otherCtx && dragCtx === otherCtx) {
@@ -192,7 +196,11 @@ export default function App() {
 
           // Tree node source -> Floating target
           if (otherCtx && !dragCtx && lSource.id !== 'top') {
-            valid = true;
+            // Isolation Check: If 'drag' node is already a fuchsia provider, it must stay isolated
+            const isFuchsiaProvider = connRef.current.some(c => c.sourceId === draggingId && c.color.includes('fuchsia'));
+            if (!isFuchsiaProvider) {
+              valid = true;
+            }
           }
           // Floating Source -> Tree Target (Fuchsia)
           if (!otherCtx && dragCtx && lTarget.id === 'top') {
@@ -352,8 +360,15 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
-        // Sticky logic: don't break until significantly further away
-        if (!best || best.dotDistance > SNAP_TOLERANCE * 1.5) {
+        // Sticky logic: don't break until significantly further away (Unbreakable Persistence)
+        const currentActiveGhost = ghosts.find((g: any) => 
+          g.sourceId === activeTether.sourceId && 
+          g.targetId === activeTether.targetId &&
+          g.sourceSide === activeTether.sourceSide &&
+          g.targetSide === activeTether.targetSide
+        ) as any;
+
+        if (!currentActiveGhost || currentActiveGhost.dotDistance > DETECTION_RANGE) {
           setActiveTether(null);
         }
       }
