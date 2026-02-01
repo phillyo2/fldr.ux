@@ -42,12 +42,13 @@ export default function App() {
     color: 'bg-slate-900',
     items: [
       { name: 'New Action', icon: 'Plus', isBuilder: true },
+      { name: 'Entry Point', icon: 'Shield', isTrigger: true, isBuilder: true },
       { name: 'Actions', icon: 'Zap', isFolder: true, items: [
         { name: 'Logic', icon: 'Code2', isFolder: true, items: [
             { name: 'Circuit Breaker', icon: 'Shuffle', isBuilder: true }
         ] },
         { name: 'Triggers', icon: 'Radio', isFolder: true, items: [
-            { name: 'Entry Point', icon: 'Shield', isTrigger: true, isBuilder: true }
+            { name: 'WebHook', icon: 'Globe', isTrigger: true, isBuilder: true }
         ] }
       ] },
       { name: 'Modifiers', icon: 'Settings', isFolder: true, color: 'bg-amber-500', items: [
@@ -111,11 +112,13 @@ export default function App() {
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
-  const gatherLayout = (mode: 'grid' | 'tether') => {
-    setLayoutMode(mode);
+  const gatherLayout = (itemsOverride?: CanvasItem[]) => {
     setIsTransitioning(true);
+    const targetItems = itemsOverride || canvasItems;
+
     setCanvasItems(prev => {
-        const newItems = prev.map(item => ({ ...item }));
+        const sourceItems = itemsOverride || prev;
+        const newItems = sourceItems.map(item => ({ ...item }));
         const visited = new Set<string>();
         const occupied = new Set<string>();
         const getPosKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
@@ -134,11 +137,15 @@ export default function App() {
             ...connections.map(c => c.targetId)
         ]);
 
+        // Standalone = No connections, not an Entry/Trigger
         const standalone = newItems.filter(i => !connIds.has(i.instanceId) && !i.isTrigger && !i.isOrigin);
         const inFlow = newItems.filter(i => connIds.has(i.instanceId) || i.isTrigger || i.isOrigin);
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
+        
+        // Roots = Nodes with no incoming connections (plus triggers/origins)
         const roots = inFlow.filter(i => !incomingTargetIds.has(i.instanceId));
 
+        // 1. Layout Standalone Grid (Dense, top-left island)
         let sx = 64, sy = 120;
         standalone.forEach((item, idx) => {
           item.x = snapToGrid(sx + (idx % 8) * GRID_SIZE, 0);
@@ -147,122 +154,81 @@ export default function App() {
           visited.add(item.instanceId);
         });
 
+        // 2. Layout Workflows (Horizontal Islands)
         let currentFlowX = snapToGrid(windowSize.w / 2 - 16, 0);
         const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
-        const sortedRoots = [...roots].sort((a, b) => (a.isOrigin ? -1 : (b.isOrigin ? 1 : 0)));
+        
+        const sortedRoots = [...roots].sort((a, b) => {
+          if (a.isOrigin) return -1;
+          if (b.isOrigin) return 1;
+          return a.instanceId.localeCompare(b.instanceId);
+        });
 
         sortedRoots.forEach((root) => {
-            let maxNodeX = currentFlowX;
+            let maxNodeXForThisTree = currentFlowX;
+            
             const processNode = (nodeId: string, cx: number, cy: number) => {
-                visited.add(nodeId); occupied.add(getPosKey(cx, cy));
-                maxNodeX = Math.max(maxNodeX, cx);
+                if (visited.has(nodeId)) return;
+                visited.add(nodeId);
+                occupied.add(getPosKey(cx, cy));
+                maxNodeXForThisTree = Math.max(maxNodeXForThisTree, cx);
+                
                 const node = newItems.find(i => i.instanceId === nodeId);
-                if (node) { node.x = cx; node.y = cy; }
+                if (node) {
+                    node.x = cx;
+                    node.y = cy;
+                }
+
                 const outgoing = connections.filter(c => c.sourceId === nodeId);
                 outgoing.forEach(conn => {
                     if (visited.has(conn.targetId)) return;
-                    const step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 1.5;
+                    
+                    const step = GRID_SIZE * 2;
                     let tx = cx, ty = cy;
-                    if (conn.sourceSide === 'bottom') ty += step * 2;
-                    else if (conn.sourceSide === 'right') tx += step * 2;
-                    else if (conn.sourceSide === 'left') tx -= step * 2;
-                    else if (conn.sourceSide === 'top') ty -= step * 2;
+                    
+                    if (conn.sourceSide === 'bottom') ty += step;
+                    else if (conn.sourceSide === 'right') tx += step;
+                    else if (conn.sourceSide === 'left') tx -= step;
+                    else if (conn.sourceSide === 'top') ty -= step;
+
                     const { tx: finalX, ty: finalY } = findSafePosition(snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), 0, GRID_SIZE);
                     processNode(conn.targetId, finalX, finalY);
                 });
             };
+
             processNode(root.instanceId, currentFlowX, startY);
-            currentFlowX = snapToGrid(maxNodeX + GRID_SIZE * 3, 0);
+            currentFlowX = snapToGrid(maxNodeXForThisTree + GRID_SIZE * 4, 0);
         });
 
+        // 3. Smooth Camera Pan to primary origin
         const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
         if (origin) {
             const targetVX = windowSize.w / 2 - (origin.x + 16) * zoom;
             const targetVY = windowSize.h / 2 - (origin.y - HEADER_OFFSET + 16) * zoom;
             setViewOffset({ x: targetVX, y: targetVY });
         }
+
         return newItems;
     });
     setTimeout(() => setIsTransitioning(false), 600);
   };
 
   const handleSmartBirth = (item: FolderItem) => {
-    // Current viewport center in world space
-    const viewCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
-    const viewCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
-
-    let spawnX = snapToGrid(viewCenterX - 16, 0);
-    let spawnY = snapToGrid(viewCenterY - 16, HEADER_OFFSET);
-
-    // Smart Tree Proximity System: Find nearest OUTPUT anchor (Red/Green) that is already part of a tree
-    let nearestDist = Infinity;
-    let targetX = spawnX;
-    let targetY = spawnY;
-
-    // Filter latch points to only prioritize output ones (bottom = green, right = red)
-    const priorityPorts = LATCH_POINTS.filter(lp => lp.id === 'bottom' || lp.id === 'right');
-
-    canvasItems.forEach(ci => {
-      // Check if this node is part of a tree context
-      const context = getTreeContext(ci.instanceId, connections);
-      if (!context && !ci.isOrigin && !ci.isTrigger) return; 
-
-      priorityPorts.forEach(lp => {
-        const px = ci.x + lp.x * 32;
-        const py = ci.y - HEADER_OFFSET + lp.y * 32;
-        const d = Math.sqrt(Math.pow(px - viewCenterX, 2) + Math.pow(py - viewCenterY, 2));
-        
-        if (d < nearestDist && d < 400) {
-          nearestDist = d;
-          const stride = GRID_SIZE * 2;
-          if (lp.id === 'bottom') { targetX = ci.x; targetY = ci.y + stride; }
-          else if (lp.id === 'right') { targetX = ci.x + stride; targetY = ci.y; }
-        }
-      });
-    });
-
-    let finalX = snapToGrid(targetX, 0);
-    let finalY = snapToGrid(targetY, HEADER_OFFSET);
-
-    // Occupancy Check: Ensure we don't spawn on top of another node
-    const isOccupied = (x: number, y: number) => canvasItems.some(i => Math.round(i.x) === Math.round(x) && Math.round(i.y) === Math.round(y));
-    
-    if (isOccupied(finalX, finalY)) {
-        let found = false;
-        let radius = 1;
-        while (!found && radius < 10) {
-            const offsets = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [-1, -1], [1, -1], [-1, 1]];
-            for (const [ox, oy] of offsets) {
-                const tx = finalX + ox * GRID_SIZE * radius;
-                const ty = finalY + oy * GRID_SIZE * radius;
-                if (!isOccupied(tx, ty)) {
-                    finalX = tx; finalY = ty;
-                    found = true; break;
-                }
-            }
-            radius++;
-        }
-    }
-
     const newInstanceId = `inst_${Date.now()}`;
     const newItem = { 
       ...item, 
       instanceId: newInstanceId, 
-      x: finalX, 
-      y: finalY, 
+      x: 0, // Placeholder, gatherLayout will position
+      y: 0, 
       isRegistered: !item.isBuilder 
     } as CanvasItem;
     
-    setCanvasItems(prev => [...prev, newItem]);
+    const updatedItems = [...canvasItems, newItem];
+    setCanvasItems(updatedItems);
     setActiveFolderView(null);
 
-    // Smooth Soft Pan to the birthed tile
-    setIsTransitioning(true);
-    const targetVX = windowSize.w / 2 - (finalX + 16) * zoom;
-    const targetVY = windowSize.h / 2 - (finalY - HEADER_OFFSET + 16) * zoom;
-    
-    setViewOffset({ x: targetVX, y: targetVY });
-    setTimeout(() => setIsTransitioning(false), 500);
+    // Immediate Auto-Gather for industrial placement
+    gatherLayout(updatedItems);
   };
 
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
@@ -329,7 +295,6 @@ export default function App() {
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
   }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, zoom]);
 
-  // --- INTERNAL COMPACT FOLDER VIEW ---
   const CompactFolderView = ({ data, side, isOpen, onClose }: { data: FolderData, side: 'left' | 'right', isOpen: boolean, onClose: () => void }) => {
     const [path, setPath] = useState<FolderItem[]>([]);
     if (!isOpen) return null;
@@ -412,8 +377,8 @@ export default function App() {
           </div>
         </div>
       </main>
-      <div onClick={() => gatherLayout('grid')} className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><LayoutGrid size={20} className="text-slate-600" /></div>
-      <div onClick={() => gatherLayout('tether')} className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Waypoints size={20} className="text-slate-600" /></div>
+      <div onClick={() => gatherLayout()} className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><LayoutGrid size={20} className="text-slate-600" /></div>
+      <div onClick={() => setLayoutMode(m => m === 'grid' ? 'tether' : 'grid')} className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Waypoints size={20} className="text-slate-600" /></div>
       <div onClick={handleZoomIn} className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Plus size={20} className="text-slate-700" /></div>
       <div onClick={handleZoomOut} className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Minus size={20} className="text-slate-700" /></div>
       
