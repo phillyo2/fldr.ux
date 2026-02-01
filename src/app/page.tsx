@@ -1,7 +1,6 @@
-
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
@@ -118,7 +117,7 @@ export default function App() {
       if (!origin) return prev;
       const visited = new Set<string>();
       const occupied = new Set<string>();
-      const minGap = mode === 'tether' ? 32 : 0;
+      const minGap = mode === 'tether' ? GRID_SIZE : 0;
       
       const isPositionOccupied = (x: number, y: number) => {
         const threshold = 1; 
@@ -160,7 +159,7 @@ export default function App() {
         inputs.forEach(conn => {
           if (visited.has(conn.sourceId)) return;
           const tx = cx;
-          const ty = cy - (GRID_SIZE + minGap); 
+          const ty = cy - (GRID_SIZE * 2); 
           const source = newItems.find(i => i.instanceId === conn.sourceId);
           if (source) { source.x = tx; source.y = ty; visited.add(source.instanceId); occupied.add(`${tx},${ty}`); }
         });
@@ -182,15 +181,6 @@ export default function App() {
       if (other.instanceId === dId) return;
       const otherInTree = isNodeInTree(other.instanceId);
       
-      // We only handshake between a tree node and a non-tree node (standard entry)
-      // Or a tree node and a floating node above (isolated input)
-      // Or tree to tree (looping - blue)
-
-      const dX = dragNode.x + 16;
-      const dY = dragNode.y + 16;
-      const oX = other.x + 16;
-      const oY = other.y + 16;
-
       const getPortPos = (item: any, side: string) => {
         if (side === 'top') return { x: item.x + 16, y: item.y };
         if (side === 'bottom') return { x: item.x + 16, y: item.y + 32 };
@@ -200,30 +190,25 @@ export default function App() {
       };
 
       LATCH_POINTS.forEach(lSource => {
-        if (lSource.type === 'input') return; // Cannot be a source from an input port
-        
         LATCH_POINTS.forEach(lTarget => {
-          if (lTarget.type !== 'input' && lTarget.type !== 'peek') return; // Must target an input or peek
+          // Rule: Outputs (bottom/right/left) MUST target a Top port for flow
+          if ((lSource.id === 'bottom' || lSource.id === 'right' || lSource.id === 'left') && lTarget.id !== 'top') return;
 
-          // Logical Check:
-          // Case A: Dragging Floating Node -> Tree Node (Attach to tree)
-          // Case B: Tree Node -> Dragging Floating Node (Consume into tree)
-          // Case C: Floating Node above Tree Node -> Isolated Input (Fuchsia)
-
+          // Check Drag Node as Source -> Stationary Node as Target
           const sPos = getPortPos(dragNode, lSource.id);
           const tPos = getPortPos(other, lTarget.id);
-
           const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
 
           if (dist < DETECTION_RANGE) {
             let color = lSource.id === 'bottom' ? 'bg-emerald-500' : lSource.id === 'right' ? 'bg-rose-500' : 'bg-amber-400';
             
-            // Isolated Input Logic: If DragNode is floating and sits above a tree node's top port
-            if (!dragInTree && otherInTree && lTarget.id === 'top' && dragNode.y < other.y) {
+            // Fuchsia logic: Floating -> Top input of Tree node
+            if (!dragInTree && otherInTree && lTarget.id === 'top') {
                color = 'bg-fuchsia-500';
             }
             
-            // Recursion Logic: Tree to Tree
+            // Standard Flow: Tree -> Anywhere (Standard connection logic handles tree membership)
+            // Recursion logic: Tree -> Tree
             if (dragInTree && otherInTree) {
                color = 'bg-blue-500';
             }
@@ -235,13 +220,11 @@ export default function App() {
               targetId: other.instanceId,
               targetSide: lTarget.id,
               color,
-              snapX: other.x, // Simplified snapping logic for grid
-              snapY: other.y,
               dotDistance: dist
             } as any);
           }
 
-          // Inverse Check (Other as source)
+          // Check Stationary Node as Source -> Drag Node as Target
           const sPosInv = getPortPos(other, lSource.id);
           const tPosInv = getPortPos(dragNode, lTarget.id);
           const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
@@ -249,6 +232,15 @@ export default function App() {
           if (distInv < DETECTION_RANGE) {
             let color = lSource.id === 'bottom' ? 'bg-emerald-500' : lSource.id === 'right' ? 'bg-rose-500' : 'bg-amber-400';
             
+            // Fuchsia logic: Floating Stationary -> Top of Tree Drag
+            if (!otherInTree && dragInTree && lTarget.id === 'top') {
+              color = 'bg-fuchsia-500';
+            }
+
+            if (dragInTree && otherInTree) {
+               color = 'bg-blue-500';
+            }
+
             ghosts.push({
               id: 'ghost',
               sourceId: other.instanceId,
@@ -256,8 +248,6 @@ export default function App() {
               targetId: dId,
               targetSide: lTarget.id,
               color,
-              snapX: dragNode.x,
-              snapY: dragNode.y,
               dotDistance: distInv
             } as any);
           }
@@ -356,8 +346,6 @@ export default function App() {
           const target = prev.find(i => i.instanceId === activeTether.targetId);
           const source = prev.find(i => i.instanceId === activeTether.sourceId);
           if (target && source) {
-             // Snap logic: if we are dragging the source, snap it relative to target. 
-             // If dragging target, snap relative to source.
              if (draggingId === activeTether.sourceId) {
                 if (activeTether.sourceSide === 'bottom' && activeTether.targetSide === 'top') { finalX = target.x; finalY = target.y - GRID_SIZE; }
                 else if (activeTether.sourceSide === 'right' && activeTether.targetSide === 'left') { finalX = target.x - GRID_SIZE; finalY = target.y; }
@@ -534,4 +522,3 @@ export default function App() {
     </div>
   );
 }
-
