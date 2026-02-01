@@ -1,6 +1,7 @@
+
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Trash2, X, LayoutGrid, Waypoints, LayoutTemplate, Home, Folder, Plus, Settings, Compass, Zap, Package, Radio, Code2, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import { SafeIcon } from '@/components/SafeIcon';
 import { AndroidFolder } from '@/components/AndroidFolder';
@@ -103,8 +104,9 @@ export default function App() {
       if (current === nodeId) return true;
       if (visited.has(current)) continue;
       visited.add(current);
-      // Fuchsia inputs are isolated data providers, not flow consumers
-      const outgoing = connections.filter(c => c.sourceId === current && !c.color.includes('fuchsia'));
+      // Fuchsia (Isolated) and Yellow (Subtree) lines are strictly followed
+      // But only non-fuchsia lines contribute to "Main Tree" membership
+      const outgoing = connRef.current.filter(c => c.sourceId === current && !c.color.includes('fuchsia'));
       outgoing.forEach(c => stack.push(c.targetId));
     }
     return false;
@@ -138,7 +140,7 @@ export default function App() {
           let found = false, safety = 0, searchDist = GRID_SIZE + minGap, tx = cx, ty = cy;
           
           if (conn.color.includes('fuchsia')) {
-            // Isolated Inputs positioned later
+            // Isolated Inputs positioned exactly one block above their target
           } else {
             while (!found && safety < 15) {
               let nextX = cx, nextY = cy;
@@ -155,6 +157,7 @@ export default function App() {
           }
         });
 
+        // Position isolated inputs exactly one cell block above
         const inputs = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
         inputs.forEach(conn => {
           if (visited.has(conn.sourceId)) return;
@@ -190,68 +193,60 @@ export default function App() {
       };
 
       LATCH_POINTS.forEach(lSource => {
-        LATCH_POINTS.forEach(lTarget => {
-          // Rule: Outputs (bottom/right/left) MUST target a Top port for flow
-          if ((lSource.id === 'bottom' || lSource.id === 'right' || lSource.id === 'left') && lTarget.id !== 'top') return;
+        // Output on Ancestor (S or D) attaches to Input (Top/Blue) on Descendant (D or S)
+        const lTarget = LATCH_POINTS.find(p => p.id === 'top')!;
 
-          // Check Drag Node as Source -> Stationary Node as Target
-          const sPos = getPortPos(dragNode, lSource.id);
-          const tPos = getPortPos(other, lTarget.id);
-          const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
+        // Case 1: Drag Node is Ancestor -> Stationary is Descendant
+        const sPos = getPortPos(dragNode, lSource.id);
+        const tPos = getPortPos(other, lTarget.id);
+        const dist = Math.sqrt(Math.pow(sPos.x - tPos.x, 2) + Math.pow(sPos.y - tPos.y, 2));
 
-          if (dist < DETECTION_RANGE) {
-            let color = lSource.id === 'bottom' ? 'bg-emerald-500' : lSource.id === 'right' ? 'bg-rose-500' : 'bg-amber-400';
-            
-            // Fuchsia logic: Floating -> Top input of Tree node
-            if (!dragInTree && otherInTree && lTarget.id === 'top') {
-               color = 'bg-fuchsia-500';
-            }
-            
-            // Standard Flow: Tree -> Anywhere (Standard connection logic handles tree membership)
-            // Recursion logic: Tree -> Tree
-            if (dragInTree && otherInTree) {
-               color = 'bg-blue-500';
-            }
+        if (dist < DETECTION_RANGE) {
+          let color = '';
+          if (lSource.id === 'bottom') color = 'bg-emerald-500';
+          else if (lSource.id === 'right') color = 'bg-rose-500';
+          else if (lSource.id === 'left') color = 'bg-amber-400';
+          else if (lSource.id === 'top') color = 'bg-blue-500';
 
-            ghosts.push({
-              id: 'ghost',
-              sourceId: dId,
-              sourceSide: lSource.id,
-              targetId: other.instanceId,
-              targetSide: lTarget.id,
-              color,
-              dotDistance: dist
-            } as any);
-          }
+          // Isolated Input Logic: Source (D) is floating, Target (S) is in tree
+          if (!dragInTree && otherInTree) color = 'bg-fuchsia-500';
 
-          // Check Stationary Node as Source -> Drag Node as Target
-          const sPosInv = getPortPos(other, lSource.id);
-          const tPosInv = getPortPos(dragNode, lTarget.id);
-          const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
+          ghosts.push({
+            id: 'ghost',
+            sourceId: dId,
+            sourceSide: lSource.id,
+            targetId: other.instanceId,
+            targetSide: lTarget.id,
+            color,
+            dotDistance: dist
+          } as any);
+        }
 
-          if (distInv < DETECTION_RANGE) {
-            let color = lSource.id === 'bottom' ? 'bg-emerald-500' : lSource.id === 'right' ? 'bg-rose-500' : 'bg-amber-400';
-            
-            // Fuchsia logic: Floating Stationary -> Top of Tree Drag
-            if (!otherInTree && dragInTree && lTarget.id === 'top') {
-              color = 'bg-fuchsia-500';
-            }
+        // Case 2: Stationary is Ancestor -> Drag Node is Descendant
+        const sPosInv = getPortPos(other, lSource.id);
+        const tPosInv = getPortPos(dragNode, lTarget.id);
+        const distInv = Math.sqrt(Math.pow(sPosInv.x - tPosInv.x, 2) + Math.pow(sPosInv.y - tPosInv.y, 2));
 
-            if (dragInTree && otherInTree) {
-               color = 'bg-blue-500';
-            }
+        if (distInv < DETECTION_RANGE) {
+          let color = '';
+          if (lSource.id === 'bottom') color = 'bg-emerald-500';
+          else if (lSource.id === 'right') color = 'bg-rose-500';
+          else if (lSource.id === 'left') color = 'bg-amber-400';
+          else if (lSource.id === 'top') color = 'bg-blue-500';
 
-            ghosts.push({
-              id: 'ghost',
-              sourceId: other.instanceId,
-              sourceSide: lSource.id,
-              targetId: dId,
-              targetSide: lTarget.id,
-              color,
-              dotDistance: distInv
-            } as any);
-          }
-        });
+          // Isolated Input Logic: Source (S) is floating, Target (D) is in tree
+          if (!otherInTree && dragInTree) color = 'bg-fuchsia-500';
+
+          ghosts.push({
+            id: 'ghost',
+            sourceId: other.instanceId,
+            sourceSide: lSource.id,
+            targetId: dId,
+            targetSide: lTarget.id,
+            color,
+            dotDistance: distInv
+          } as any);
+        }
       });
     });
 
@@ -270,7 +265,9 @@ export default function App() {
     if (now - lastTap.current < 300) {
       const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
-      setIsPanning(true); panStart.current = { x: clientX, y: clientY }; panOffsetStart.current = { ...viewOffset };
+      if (currentPageId !== 'home') {
+        setIsPanning(true); panStart.current = { x: clientX, y: clientY }; panOffsetStart.current = { ...viewOffset };
+      }
     }
     lastTap.current = now;
   };
@@ -376,16 +373,9 @@ export default function App() {
   }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, currentPageId]); 
 
   return (
-    <div className="relative w-full h-screen bg-[#F8FAFC] overflow-hidden select-none font-sans">
-      <nav className="fixed top-0 left-0 right-0 h-14 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-8 z-[60]">
-        <div className="flex items-center gap-4">
-           <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white font-black shadow-lg"><SafeIcon name="Zap" size={16} fill="white"/></div>
-           <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{currentPageId === 'home' ? 'Dashboard' : 'Logic Studio'}</span>
-        </div>
-      </nav>
-
-      <main className="absolute inset-0 mt-14 overflow-hidden">
-        <div className="w-full h-full relative overflow-hidden bg-slate-50" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
+    <div className="relative w-full h-screen bg-white overflow-hidden select-none font-sans">
+      <main className="absolute inset-0 overflow-hidden">
+        <div className="w-full h-full relative overflow-hidden bg-white" onMouseDown={handleCanvasPointerDown} onTouchStart={handleCanvasPointerDown} onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}>
           <div className="absolute inset-0 pointer-events-none opacity-100" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, #E2E8F0 2.5px, transparent 0)`, backgroundSize: `32px 32px`, backgroundPosition: `${(viewOffset.x + 16) % 32}px ${(viewOffset.y + 16) % 32}px` }} />
 
           <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px)` }} className="w-full h-full relative">
