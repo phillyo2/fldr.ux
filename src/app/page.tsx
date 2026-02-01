@@ -265,28 +265,27 @@ export default function App() {
             startY = ty + (mode === 'grid' ? GRID_SIZE * 2 : GRID_SIZE * 3);
         });
 
-        const origin = newItems.find(i => i.isOrigin);
+        const origin = newItems.find(i => i.isOrigin) || sortedRoots[0];
         if (origin) {
-            const vx = - (origin.x - (windowSize.w / 2) + 16);
-            const vy = - (origin.y - (windowSize.h / 2) + 16);
-            setViewOffset({ x: vx, y: vy });
+            const targetVX = windowSize.w / 2 - (origin.x + 16) * zoom;
+            const targetVY = windowSize.h / 2 - (origin.y - HEADER_OFFSET + 16) * zoom;
+            
+            setIsTransitioning(true);
+            setViewOffset({ x: targetVX, y: targetVY });
+            setTimeout(() => setIsTransitioning(false), 500);
         }
         return newItems;
     });
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
-    // Proximity Spawning Logic:
-    // 1. Identify current screen center in canvas space
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
 
     let bestAnchorPos = { x: screenCenterX, y: screenCenterY };
     let minDist = Infinity;
 
-    // 2. Find nearest output anchor (Red or Green) to screen center
     canvasItems.forEach(node => {
-      // Bottom Anchor (Green)
       const bX = node.x + 16;
       const bY = node.y + 32;
       const dBottom = Math.sqrt(Math.pow(bX - screenCenterX, 2) + Math.pow(bY - screenCenterY, 2));
@@ -294,7 +293,6 @@ export default function App() {
         minDist = dBottom;
         bestAnchorPos = { x: bX, y: bY };
       }
-      // Right Anchor (Red)
       const rX = node.x + 32;
       const rY = node.y + 16;
       const dRight = Math.sqrt(Math.pow(rX - screenCenterX, 2) + Math.pow(rY - screenCenterY, 2));
@@ -304,11 +302,9 @@ export default function App() {
       }
     });
 
-    // 3. Position new tile relative to nearest anchor
     let spawnX = snapToGrid(bestAnchorPos.x - 16, 0);
     let spawnY = snapToGrid(bestAnchorPos.y + GRID_SIZE, HEADER_OFFSET);
 
-    // Basic collision avoidance
     const occupied = new Set(canvasItems.map(i => `${Math.round(i.x)},${Math.round(i.y)}`));
     let safety = 0;
     while (occupied.has(`${Math.round(spawnX)},${Math.round(spawnY)}`) && safety < 10) {
@@ -320,8 +316,7 @@ export default function App() {
     const newItem = { ...item, instanceId: newInstanceId, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem;
     setCanvasItems(prev => [...prev, newItem]);
 
-    // 4. Soft Panning Logic: Pan slightly if the new node is too far over
-    const margin = 120; // Proximity margin to screen edges
+    const margin = 120;
     const screenSpawnX = spawnX * zoom + viewOffset.x;
     const screenSpawnY = (spawnY - HEADER_OFFSET) * zoom + viewOffset.y;
 
@@ -335,7 +330,6 @@ export default function App() {
       const targetVX = windowSize.w / 2 - (spawnX + 16) * zoom;
       const targetVY = windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom;
       
-      // Perform a non-instant, soft pan towards the new node
       setIsTransitioning(true);
       setViewOffset(prev => ({
         x: prev.x + (targetVX - prev.x) * 0.7,
