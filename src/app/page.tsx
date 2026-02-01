@@ -377,8 +377,6 @@ export default function App() {
       if (best && best.dotDistance < SNAP_TOLERANCE) {
         setActiveTether({ ...best });
       } else if (activeTether) {
-        // Persistence Protocol: If a new candidate is found, switch to it. 
-        // Otherwise, never disappear until set down.
         if (best) {
           setActiveTether({ ...best });
         }
@@ -399,7 +397,6 @@ export default function App() {
       
       setCanvasItems(prev => {
         const item = prev.find(i => i.instanceId === draggingId); if (!item) return prev;
-        // Strict Global Grid Snap: Drops exactly where release happened, no relative snap-back
         let finalX = snapToGrid(item.x, 0); let finalY = snapToGrid(item.y, HEADER_OFFSET);
         return prev.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
       });
@@ -507,24 +504,26 @@ export default function App() {
         </div>
       </main>
 
-      {/* Top Right Cluster: Gather Layout Controls */}
-      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-3">
-         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-10 h-10 bg-white/80 backdrop-blur-md border border-slate-200 rounded-xl shadow-lg flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><LayoutGrid size={20} className="text-slate-600" /></div>
-         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-10 h-10 bg-white/80 backdrop-blur-md border border-slate-200 rounded-xl shadow-lg flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><Waypoints size={20} className="text-slate-600" /></div>
+      {/* Grid-Locked Command Cluster (Top Right) */}
+      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-2">
+         <div onClick={() => gatherLayout('grid')} title="Grid Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><LayoutGrid size={20} className="text-slate-600" /></div>
+         <div onClick={() => gatherLayout('tether')} title="Tether Gather" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><Waypoints size={20} className="text-slate-600" /></div>
       </div>
 
-      {/* Center Right Zoom Controls */}
-      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col gap-4">
-         <button onClick={handleZoomIn} title="Zoom In" className="w-12 h-12 bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><Plus size={24} className="text-slate-700" /></button>
-         <button onClick={handleZoomOut} title="Zoom Out" className="w-12 h-12 bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl flex items-center justify-center cursor-pointer hover:bg-white transition-all active:scale-90"><Minus size={24} className="text-slate-700" /></button>
+      {/* Grid-Locked Zoom Cluster (Center Right) */}
+      <div className="fixed top-1/2 right-8 -translate-y-1/2 z-[1000] flex flex-col gap-2">
+         <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><Plus size={20} className="text-slate-700" /></button>
+         <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 bg-white border border-slate-200 rounded-md shadow-sm flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-all active:scale-90"><Minus size={20} className="text-slate-700" /></button>
       </div>
 
-      <div className="fixed bottom-8 left-8 z-[500] flex flex-col gap-2">
-         <div onClick={() => setActiveFolderView('toolbox')} className="w-10 h-10 bg-slate-900 rounded-xl shadow-2xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20 mt-2"><Folder size={20} className="text-white" /></div>
+      {/* Grid-Locked Toolbox Access (Bottom Left) */}
+      <div className="fixed bottom-8 left-8 z-[500]">
+         <div onClick={() => setActiveFolderView('toolbox')} className="w-8 h-8 bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-slate-800"><Folder size={20} className="text-white" /></div>
       </div>
       
+      {/* Grid-Locked Navigator Access (Bottom Right) */}
       <div className="fixed bottom-8 right-8 z-[500]">
-        <div onClick={() => setActiveFolderView('nav')} className="w-10 h-10 bg-blue-600 rounded-xl shadow-2xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform active:scale-95 border border-white/20"><Compass size={20} className="text-white" /></div>
+        <div onClick={() => setActiveFolderView('nav')} className="w-8 h-8 bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform active:scale-95 border border-blue-700"><Compass size={20} className="text-white" /></div>
       </div>
 
       <AndroidFolder title={navData.title} icon={navData.icon} color={navData.color} items={navData.items} isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} onSelect={handleFolderSelect} />
