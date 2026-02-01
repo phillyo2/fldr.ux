@@ -494,10 +494,22 @@ export default function App() {
                           const connectedAsSource = connections.find(c => c.sourceId === item.instanceId && c.sourceSide === lp.id);
                           const connectedAsTarget = connections.find(c => c.targetId === item.instanceId && c.targetSide === lp.id);
                           const tethered = activeTether && ((activeTether.sourceId === item.instanceId && activeTether.sourceSide === lp.id) || (activeTether.targetId === item.instanceId && activeTether.targetSide === lp.id));
+                          
                           let dotColor = 'bg-slate-200';
                           let opacityClass = 'opacity-0 scale-50';
+
                           if (connectedAsSource || connectedAsTarget || tethered) {
                             opacityClass = 'opacity-100 scale-100';
+
+                            // Proximity-Based Dot Culling: Hide input dot if snapped directly to parent anchor
+                            if (lp.id === 'top' && (connectedAsTarget || (activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top'))) {
+                              const parentId = connectedAsTarget ? connectedAsTarget.sourceId : activeTether?.sourceId;
+                              const parent = canvasItems.find(i => i.instanceId === parentId);
+                              if (parent && Math.abs(parent.x - item.x) < 1 && Math.abs((parent.y + 32) - item.y) < 1) {
+                                opacityClass = 'opacity-0 scale-50';
+                              }
+                            }
+
                             if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
                             else if (lp.id === 'right') dotColor = 'bg-rose-500';
                             else if (lp.id === 'left') dotColor = 'bg-amber-400';
