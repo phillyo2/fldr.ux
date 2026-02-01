@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -186,14 +187,62 @@ export default function App() {
   };
 
   const handleSmartBirth = (item: Partial<FolderItem>) => {
-    const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
-    const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
-    let spawnX = snapToGrid(screenCenterX - 16, 0);
-    let spawnY = snapToGrid(screenCenterY - 16, HEADER_OFFSET);
+    // Current viewport center in world space
+    const viewCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
+    const viewCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
+
+    let spawnX = snapToGrid(viewCenterX - 16, 0);
+    let spawnY = snapToGrid(viewCenterY - 16, HEADER_OFFSET);
+
+    // Smart Proximity System: Find nearest anchor point to the center of the screen
+    let nearestDist = Infinity;
+    let targetX = spawnX;
+    let targetY = spawnY;
+
+    canvasItems.forEach(ci => {
+      LATCH_POINTS.forEach(lp => {
+        // World position of the port dot
+        const px = ci.x + lp.x * 32;
+        const py = ci.y - HEADER_OFFSET + lp.y * 32;
+        const d = Math.sqrt(Math.pow(px - viewCenterX, 2) + Math.pow(py - viewCenterY, 2));
+        
+        // If we found a closer anchor within reasonable reach
+        if (d < nearestDist && d < 400) {
+          nearestDist = d;
+          // Position nearby: exactly 2 stride units in the direction of the port
+          const stride = GRID_SIZE * 2;
+          if (lp.id === 'bottom') { targetX = ci.x; targetY = ci.y + stride; }
+          else if (lp.id === 'right') { targetX = ci.x + stride; targetY = ci.y; }
+          else if (lp.id === 'top') { targetX = ci.x; targetY = ci.y - stride; }
+          else if (lp.id === 'left') { targetX = ci.x - stride; targetY = ci.y; }
+        }
+      });
+    });
+
+    if (nearestDist < Infinity) {
+      spawnX = snapToGrid(targetX, 0);
+      spawnY = snapToGrid(targetY, HEADER_OFFSET);
+    }
+
     const newInstanceId = `inst_${Date.now()}`;
-    const newItem = { ...item, instanceId: newInstanceId, x: spawnX, y: spawnY, isRegistered: !item.isBuilder } as CanvasItem;
+    const newItem = { 
+      ...item, 
+      instanceId: newInstanceId, 
+      x: spawnX, 
+      y: spawnY, 
+      isRegistered: !item.isBuilder 
+    } as CanvasItem;
+    
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
+
+    // Smooth Soft Pan to the birthed tile
+    setIsTransitioning(true);
+    const targetVX = windowSize.w / 2 - (spawnX + 16) * zoom;
+    const targetVY = windowSize.h / 2 - (spawnY - HEADER_OFFSET + 16) * zoom;
+    
+    setViewOffset({ x: targetVX, y: targetVY });
+    setTimeout(() => setIsTransitioning(false), 500);
   };
 
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
