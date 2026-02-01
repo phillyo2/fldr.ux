@@ -137,15 +137,12 @@ export default function App() {
             ...connections.map(c => c.targetId)
         ]);
 
-        // Standalone = No connections, not an Entry/Trigger
         const standalone = newItems.filter(i => !connIds.has(i.instanceId) && !i.isTrigger && !i.isOrigin);
         const inFlow = newItems.filter(i => connIds.has(i.instanceId) || i.isTrigger || i.isOrigin);
         const incomingTargetIds = new Set(connections.map(c => c.targetId));
-        
-        // Roots = Nodes with no incoming connections (plus triggers/origins)
         const roots = inFlow.filter(i => !incomingTargetIds.has(i.instanceId));
 
-        // 1. Layout Standalone Grid (Dense, top-left island)
+        // 1. Standalone Grid (Top-Left Island)
         let sx = 64, sy = 120;
         standalone.forEach((item, idx) => {
           item.x = snapToGrid(sx + (idx % 8) * GRID_SIZE, 0);
@@ -154,7 +151,7 @@ export default function App() {
           visited.add(item.instanceId);
         });
 
-        // 2. Layout Workflows (Horizontal Islands)
+        // 2. Workflow Islands (Horizontal Side-by-Side)
         let currentFlowX = snapToGrid(windowSize.w / 2 - 16, 0);
         const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
         
@@ -174,18 +171,13 @@ export default function App() {
                 maxNodeXForThisTree = Math.max(maxNodeXForThisTree, cx);
                 
                 const node = newItems.find(i => i.instanceId === nodeId);
-                if (node) {
-                    node.x = cx;
-                    node.y = cy;
-                }
+                if (node) { node.x = cx; node.y = cy; }
 
                 const outgoing = connections.filter(c => c.sourceId === nodeId);
                 outgoing.forEach(conn => {
                     if (visited.has(conn.targetId)) return;
-                    
                     const step = GRID_SIZE * 2;
                     let tx = cx, ty = cy;
-                    
                     if (conn.sourceSide === 'bottom') ty += step;
                     else if (conn.sourceSide === 'right') tx += step;
                     else if (conn.sourceSide === 'left') tx -= step;
@@ -200,7 +192,7 @@ export default function App() {
             currentFlowX = snapToGrid(maxNodeXForThisTree + GRID_SIZE * 4, 0);
         });
 
-        // 3. Smooth Camera Pan to primary origin
+        // Camera Pan
         const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
         if (origin) {
             const targetVX = windowSize.w / 2 - (origin.x + 16) * zoom;
@@ -210,25 +202,80 @@ export default function App() {
 
         return newItems;
     });
-    setTimeout(() => setIsTransitioning(false), 600);
+    setTimeout(() => setIsTransitioning(false), 500);
   };
 
   const handleSmartBirth = (item: FolderItem) => {
     const newInstanceId = `inst_${Date.now()}`;
+    const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
+    const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
+
+    // RULE: Auto-gather ONLY for Entry Points
+    if (item.isTrigger) {
+      const newItem = { 
+        ...item, 
+        instanceId: newInstanceId, 
+        x: screenCenterX, 
+        y: screenCenterY + HEADER_OFFSET, 
+        isRegistered: !item.isBuilder 
+      } as CanvasItem;
+      const updatedItems = [...canvasItems, newItem];
+      setCanvasItems(updatedItems);
+      setActiveFolderView(null);
+      gatherLayout(updatedItems);
+      return;
+    }
+
+    // Standard Logic Spawning (Nearby Anchor, No Gather)
+    let spawnX = screenCenterX;
+    let spawnY = screenCenterY;
+    const treeCtxs = new Set(canvasItems.map(i => getTreeContext(i.instanceId, connections)).filter(Boolean));
+    
+    const candidates: {x: number, y: number, dist: number}[] = [];
+    canvasItems.forEach(i => {
+      const isPartOfTree = getTreeContext(i.instanceId, connections);
+      if (!isPartOfTree) return;
+      
+      LATCH_POINTS.forEach(lp => {
+        if (lp.id !== 'bottom' && lp.id !== 'right') return;
+        const px = i.x + (lp.id === 'right' ? 32 : 16);
+        const py = i.y - HEADER_OFFSET + (lp.id === 'bottom' ? 32 : 16);
+        const dist = Math.sqrt(Math.pow(px - screenCenterX, 2) + Math.pow(py - screenCenterY, 2));
+        candidates.push({ x: px + (lp.id === 'right' ? 64 : 0), y: py + (lp.id === 'bottom' ? 64 : 0), dist });
+      });
+    });
+
+    if (candidates.length > 0) {
+      const best = candidates.sort((a, b) => a.dist - b.dist)[0];
+      spawnX = best.x - 16;
+      spawnY = best.y + HEADER_OFFSET - 16;
+    }
+
+    // Occupancy check
+    let safety = 0;
+    const occupied = new Set(canvasItems.map(i => `${snapToGrid(i.x, 0)},${snapToGrid(i.y, HEADER_OFFSET)}`));
+    while (occupied.has(`${snapToGrid(spawnX, 0)},${snapToGrid(spawnY, HEADER_OFFSET)}`) && safety < 100) {
+      spawnY += GRID_SIZE;
+      safety++;
+    }
+
     const newItem = { 
       ...item, 
       instanceId: newInstanceId, 
-      x: 0, // Placeholder, gatherLayout will position
-      y: 0, 
+      x: snapToGrid(spawnX, 0), 
+      y: snapToGrid(spawnY, HEADER_OFFSET), 
       isRegistered: !item.isBuilder 
     } as CanvasItem;
     
-    const updatedItems = [...canvasItems, newItem];
-    setCanvasItems(updatedItems);
+    setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
-    // Immediate Auto-Gather for industrial placement
-    gatherLayout(updatedItems);
+    // Smooth Pan to new tile
+    setIsTransitioning(true);
+    const targetVX = windowSize.w / 2 - (newItem.x + 16) * zoom;
+    const targetVY = windowSize.h / 2 - (newItem.y - HEADER_OFFSET + 16) * zoom;
+    setViewOffset({ x: targetVX, y: targetVY });
+    setTimeout(() => setIsTransitioning(false), 500);
   };
 
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
@@ -258,9 +305,6 @@ export default function App() {
     }
   };
 
-  const handleZoomIn = () => setZoom(prev => Math.min(2, prev + 0.1));
-  const handleZoomOut = () => setZoom(prev => Math.max(0.5, prev - 0.1));
-
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = 'clientX' in e ? e.clientX : (e as TouchEvent).touches[0].clientX;
@@ -284,7 +328,7 @@ export default function App() {
     };
     const handleUp = (e: MouseEvent | TouchEvent) => {
       setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
-      if (isPanning) { setViewOffset(prev => ({ x: snapToGrid(prev.x, 0), y: snapToGrid(prev.y, 0) })); setIsPanning(false); return; }
+      if (isPanning) { setIsPanning(false); return; }
       if (!isDragging) return; 
       setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x: snapToGrid(i.x, 0), y: snapToGrid(i.y, HEADER_OFFSET) } : i));
       if (activeTether) { setConnections(prev => prev.some(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide) ? prev : [...prev, { ...activeTether, id: `conn_${Date.now()}` }]); }
@@ -379,8 +423,8 @@ export default function App() {
       </main>
       <div onClick={() => gatherLayout()} className="fixed top-[28px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><LayoutGrid size={20} className="text-slate-600" /></div>
       <div onClick={() => setLayoutMode(m => m === 'grid' ? 'tether' : 'grid')} className="fixed top-[60px] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Waypoints size={20} className="text-slate-600" /></div>
-      <div onClick={handleZoomIn} className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Plus size={20} className="text-slate-700" /></div>
-      <div onClick={handleZoomOut} className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Minus size={20} className="text-slate-700" /></div>
+      <div onClick={() => setZoom(prev => Math.min(2, prev + 0.1))} className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Plus size={20} className="text-slate-700" /></div>
+      <div onClick={() => setZoom(prev => Math.max(0.5, prev - 0.1))} className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Minus size={20} className="text-slate-700" /></div>
       
       <div onClick={() => setActiveFolderView(v => v === 'toolbox' ? null : 'toolbox')} className="fixed bottom-[28px] left-[28px] z-[700] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800"><Folder size={20} className="text-white" /></div>
       <div onClick={() => setActiveFolderView(v => v === 'nav' ? null : 'nav')} className="fixed bottom-[28px] right-[28px] z-[700] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-blue-700"><Compass size={20} className="text-white" /></div>
