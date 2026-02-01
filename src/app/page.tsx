@@ -262,7 +262,7 @@ export default function App() {
             outgoing.forEach(conn => {
                 if (visited.has(conn.targetId)) return;
                 
-                const isPerformingRecursion = connections.some(c => 
+                const targetIsPerformingRecursion = connections.some(c => 
                   c.sourceId === conn.targetId && 
                   !c.color.includes('emerald') && 
                   !c.color.includes('rose') && 
@@ -272,7 +272,7 @@ export default function App() {
                 );
 
                 let step = GRID_SIZE;
-                if (mode === 'tether' || (mode === 'grid' && isPerformingRecursion)) {
+                if (mode === 'tether' || (mode === 'grid' && targetIsPerformingRecursion)) {
                     step = GRID_SIZE * 2; 
                 }
 
@@ -496,6 +496,15 @@ export default function App() {
                           let opacityClass = 'opacity-0 scale-50';
 
                           if (connectedAsSource || connectedAsTarget || tethered) {
+                            if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
+                            else if (lp.id === 'right') dotColor = 'bg-rose-500';
+                            else if (lp.id === 'left') dotColor = 'bg-amber-400';
+                            else { 
+                              const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
+                              const activeIsFuchsia = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia');
+                              dotColor = (isFuchsia || activeIsFuchsia) ? 'bg-fuchsia-500' : 'bg-blue-500'; 
+                            }
+
                             opacityClass = 'opacity-100 scale-100';
 
                             const connection = connectedAsSource || connectedAsTarget || (tethered ? activeTether : null);
@@ -515,20 +524,11 @@ export default function App() {
                                   const itsY = otherItem.y + otherLp.y * 32;
                                   const dist = Math.sqrt(Math.pow(myX - itsX, 2) + Math.pow(myY - itsY, 2));
 
-                                  if (dist < 24) {
+                                  if (dist < 24 && dotColor !== 'bg-fuchsia-500') {
                                     opacityClass = 'opacity-0 scale-50';
                                   }
                                 }
                               }
-                            }
-
-                            if (lp.id === 'bottom') dotColor = 'bg-emerald-500';
-                            else if (lp.id === 'right') dotColor = 'bg-rose-500';
-                            else if (lp.id === 'left') dotColor = 'bg-amber-400';
-                            else { 
-                              const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
-                              const activeIsFuchsia = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia');
-                              dotColor = (isFuchsia || activeIsFuchsia) ? 'bg-fuchsia-500' : 'bg-blue-500'; 
                             }
                           }
                           return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${opacityClass}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
