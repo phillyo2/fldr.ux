@@ -164,6 +164,7 @@ export default function App() {
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
+    // Auto-gathering disabled as per request
     setIsTransitioning(true);
     const targetVX = windowSize.w / 2 - (newItem.x + 16) * zoom;
     const targetVY = windowSize.h / 2 - (newItem.y - HEADER_OFFSET + 16) * zoom;
@@ -184,7 +185,7 @@ export default function App() {
       if (item.isTrigger || item.isDataProvider) {
         setConnections(prev => prev.map(c => 
           c.sourceId === editingItem.instanceId && c.color.includes('slate') 
-            ? { ...c, color: item.isTrigger ? 'orange-500' : 'orange-400' } 
+            ? { ...c, color: item.isTrigger ? 'orange-500' : 'fuchsia-500' } 
             : c
         ));
       }
@@ -355,8 +356,8 @@ export default function App() {
                   </svg>
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)} className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                      <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isTrigger ? 'border-orange-500' : (item.isDataProvider ? 'border-orange-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')))}`}>
-                        {item.isOrigin ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isTrigger ? 'text-orange-600' : (item.isDataProvider ? 'text-orange-500' : (item.isRegistered ? 'text-slate-800' : 'text-emerald-500'))} />}
+                      <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isTrigger ? 'border-orange-500' : (item.isDataProvider ? 'border-fuchsia-500' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')))}`}>
+                        {item.isOrigin ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isTrigger ? 'text-orange-600' : (item.isDataProvider ? 'text-fuchsia-600' : (item.isRegistered ? 'text-slate-800' : 'text-emerald-500'))} />}
                         {LATCH_POINTS.map(lp => {
                           const { dotColor, isActive } = getPortState(item, lp, connections, activeTether);
                           return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;

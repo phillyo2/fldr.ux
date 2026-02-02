@@ -3,11 +3,13 @@ import { LATCH_POINTS, DETECTION_RANGE } from './constants';
 import { isAncestor } from './pathing';
 
 /**
- * Handshake Engine v1.6 [Vibrant Trigger Protocol]
+ * Handshake Engine v1.7 [Vibrant Signal Protocol]
  * 
- * - Vibrant Orange (orange-500) for Trigger lines.
- * - Amber Yellow (orange-400) for Data Provider lines.
- * - Gray (slate-300) for Ambiguous Placeholder docking on Entry Points.
+ * - Orange (orange-500): Trigger connections.
+ * - Purple (fuchsia-500): Data Provider connections.
+ * - Gray (slate-300): Ambiguous Placeholder docking.
+ * - Blue (blue-500): Standard Top-Input flow.
+ * - Yellow (amber-400): Parallel/Peek Left-Input.
  */
 
 export const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
@@ -43,8 +45,6 @@ export const calculateGhostHandshakes = (
   const dragCtx = getTreeContext(dId, connections);
   const fuchsiaProviders = new Set(connections.filter(c => c.color.includes('fuchsia')).map(c => c.sourceId));
 
-  if (fuchsiaProviders.has(dId)) return ghosts;
-
   const getPortPos = (item: any, side: string) => {
     if (side === 'top') return { x: item.x + 16, y: item.y };
     if (side === 'bottom') return { x: item.x + 16, y: item.y + 32 };
@@ -57,9 +57,8 @@ export const calculateGhostHandshakes = (
     if (other.instanceId === dId) return;
     
     LATCH_POINTS.forEach(lSource => {
-      // Trigger Isolation: Only Emerald (Bottom) allowed
-      if (dragNode.isTrigger && lSource.id !== 'bottom') return;
-      if (dragNode.isDataProvider && lSource.id !== 'bottom') return;
+      // Trigger/DataProvider Isolation: Only Bottom allowed for output
+      if ((dragNode.isTrigger || dragNode.isDataProvider) && lSource.id !== 'bottom') return;
 
       const isOutputAnchor = lSource.id === 'bottom' || lSource.id === 'right';
       
@@ -75,14 +74,14 @@ export const calculateGhostHandshakes = (
           let color = lSource.color.replace('bg-', '');
           let valid = false;
 
-          // TRIGGER/PLACEHOLDER SPECIAL CASE: To Entry Point Top
+          // SPECIAL UPSTREAM CASES: To Entry Point Top
           if (other.isOrigin && lSource.id === 'bottom' && lTarget.id === 'top') {
             if (dragNode.isTrigger) {
               valid = true;
               color = 'orange-500'; // Vibrant Orange for Trigger
             } else if (dragNode.isDataProvider) {
               valid = true;
-              color = 'orange-400'; // Amber Orange for Data
+              color = 'fuchsia-500'; // Purple for Data
             } else if (!dragNode.isRegistered) {
               valid = true;
               color = 'slate-300'; // Gray for Ambiguous Placeholder
@@ -93,7 +92,7 @@ export const calculateGhostHandshakes = (
              const otherCtx = getTreeContext(other.instanceId, connections);
              if (!dragCtx && otherCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
                const dragHasAnyConnection = connections.some(c => c.sourceId === dId || c.targetId === dId);
-               if (!dragHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
+               if (!dragHasAnyConnection) { valid = true; color = 'blue-500'; }
              }
              else if (dragCtx && !otherCtx && lSource.id !== 'top') { valid = true; }
              else if (dragCtx && otherCtx && dragCtx === otherCtx) {
@@ -126,7 +125,7 @@ export const calculateGhostHandshakes = (
               color = 'orange-500';
             } else if (other.isDataProvider) {
               valid = true;
-              color = 'orange-400';
+              color = 'fuchsia-500';
             } else if (!other.isRegistered) {
               valid = true;
               color = 'slate-300';
@@ -140,7 +139,7 @@ export const calculateGhostHandshakes = (
             }
             if (!otherCtx && dragCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
                const otherHasAnyConnection = connections.some(c => c.sourceId === other.instanceId || c.targetId === other.instanceId);
-               if (!otherHasAnyConnection) { valid = true; color = 'fuchsia-500'; }
+               if (!otherHasAnyConnection) { valid = true; color = 'blue-500'; }
             }
           }
 
@@ -158,6 +157,7 @@ export const getPortState = (
   connections: Connection[], 
   activeTether: Connection | null
 ) => {
+  // Trigger/DataProvider Isolation: Disallow Blue, Yellow, Red ports for Triggers
   if ((item.isTrigger || item.isDataProvider) && lp.id !== 'bottom') {
     return { dotColor: 'bg-transparent', isActive: false };
   }
@@ -177,32 +177,30 @@ export const getPortState = (
     if (lp.id === 'bottom') {
       const isVibrantOrange = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('orange-500'));
       const activeIsVibrantOrange = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('orange-500');
-      const isAmberOrange = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('orange-400'));
-      const activeIsAmberOrange = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('orange-400');
+      const isFuchsia = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('fuchsia-500'));
+      const activeIsFuchsia = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('fuchsia-500');
       const isGray = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('slate-300'));
       const activeIsGray = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('slate-300');
       
       if (isVibrantOrange || activeIsVibrantOrange) dotColor = 'bg-orange-500';
-      else if (isAmberOrange || activeIsAmberOrange) dotColor = 'bg-orange-400';
+      else if (isFuchsia || activeIsFuchsia) dotColor = 'bg-fuchsia-500';
       else if (isGray || activeIsGray) dotColor = 'bg-slate-300';
       else dotColor = 'bg-emerald-500';
     }
     else if (lp.id === 'right') dotColor = 'bg-rose-500';
     else if (lp.id === 'left') dotColor = 'bg-amber-400';
     else {
-      const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
-      const activeIsFuchsia = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia');
-      const isVibrantInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('orange-500'));
-      const activeIsVibrantInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('orange-500');
-      const isAmberInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('orange-400'));
-      const activeIsAmberInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('orange-400');
+      // Top Port Illumination
+      const isFuchsiaInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia-500'));
+      const activeIsFuchsiaInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia-500');
+      const isVibrantOrangeInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('orange-500'));
+      const activeIsVibrantOrangeInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('orange-500');
       const isGrayInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('slate-300'));
       const activeIsGrayInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('slate-300');
       
-      if (isVibrantInput || activeIsVibrantInput) dotColor = 'bg-orange-500';
-      else if (isAmberInput || activeIsAmberInput) dotColor = 'bg-orange-400';
+      if (isVibrantOrangeInput || activeIsVibrantOrangeInput) dotColor = 'bg-orange-500';
+      else if (isFuchsiaInput || activeIsFuchsiaInput) dotColor = 'bg-fuchsia-500';
       else if (isGrayInput || activeIsGrayInput) dotColor = 'bg-slate-300';
-      else if (isFuchsia || activeIsFuchsia) dotColor = 'bg-fuchsia-500';
       else dotColor = 'bg-blue-500';
     }
   }
