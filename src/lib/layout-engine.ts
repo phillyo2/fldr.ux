@@ -94,7 +94,7 @@ export function calculateIslandLayout(
     return { tx, ty };
   };
 
-  // 1. Connection Filtering: Grid mode fragments, Tether view integrates Fuchsia
+  // 1. Connection Filtering: Grid mode fragments, Tether mode integrates all
   const flowConnections = isGrid 
     ? connections.filter(c => !c.color.includes('fuchsia') && !c.color.includes('blue'))
     : connections.filter(c => !c.color.includes('blue')); // Blue is just an indicator in Tether
@@ -117,16 +117,18 @@ export function calculateIslandLayout(
     const node = newItems.find(i => i.instanceId === nodeId);
     if (!node) return;
 
-    // Place Fuchsia Providers "Up and Left" in Tether View
+    // Place Fuchsia Providers "Up and To The Left" of their connected node in Tether Mode
     if (!isGrid) {
       const dataProviders = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
       dataProviders.forEach(conn => {
         const provider = newItems.find(i => i.instanceId === conn.sourceId);
         if (provider && !visited.has(provider.instanceId)) {
           visited.add(provider.instanceId);
+          // Position strictly up and to the left
           provider.x = cx - (stepSize / 2);
           provider.y = cy - (stepSize / 2);
           occupied.add(getPosKey(provider.x, provider.y));
+          islandState.maxX = Math.max(islandState.maxX, provider.x);
         }
       });
     }
