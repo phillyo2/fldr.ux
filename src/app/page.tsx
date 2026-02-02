@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -136,7 +137,6 @@ export default function App() {
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
 
-    // RULE: Auto-gather ONLY for Entry Points
     if (item.isTrigger) {
       const newItem = { 
         ...item, 
@@ -152,71 +152,44 @@ export default function App() {
       return;
     }
 
-    // --- Smart Spawning Engine ---
     let spawnX = screenCenterX;
     let spawnY = screenCenterY;
-    
     const candidates: {x: number, y: number, dist: number, side: string}[] = [];
     
-    // Scan for tree-associated output anchors
     canvasItems.forEach(i => {
       const isPartOfTree = getTreeContext(i.instanceId, connections);
       const isEntry = i.isTrigger || i.isOrigin;
-      
-      // Filter candidates: parts of trees, or Entry Points if no trees exist
       if (!isPartOfTree && !isEntry) return;
 
       LATCH_POINTS.forEach(lp => {
-        // Specifically target output anchor ports (Red/Right, Green/Bottom)
         if (lp.id !== 'bottom' && lp.id !== 'right') return;
-        
         const px = i.x + (lp.id === 'right' ? 32 : 16);
         const py = i.y - HEADER_OFFSET + (lp.id === 'bottom' ? 32 : 16);
         const dist = Math.sqrt(Math.pow(px - screenCenterX, 2) + Math.pow(py - screenCenterY, 2));
-        
-        candidates.push({ 
-          x: px + (lp.id === 'right' ? 64 : 0), 
-          y: py + (lp.id === 'bottom' ? 64 : 0), 
-          dist, 
-          side: lp.id 
-        });
+        candidates.push({ x: px + (lp.id === 'right' ? 64 : 0), y: py + (lp.id === 'bottom' ? 64 : 0), dist, side: lp.id });
       });
     });
 
-    // If we have candidates, pick the one closest to the center
     if (candidates.length > 0) {
       const best = candidates.sort((a, b) => a.dist - b.dist)[0];
       spawnX = best.x - 16;
       spawnY = best.y + HEADER_OFFSET - 16;
     }
 
-    // --- Smart Occupancy Engine ---
-    // Prevent overlapping by finding the next available slot in the flow direction
     let safety = 0;
     const occupied = new Set(canvasItems.map(i => `${snapToGrid(i.x, 0)},${snapToGrid(i.y, HEADER_OFFSET)}`));
-    
     while (occupied.has(`${snapToGrid(spawnX, 0)},${snapToGrid(spawnY, HEADER_OFFSET)}`) && safety < 100) {
-      // Find the anchor we were targeting to determine "natural" flow direction
       const flowDir = candidates.length > 0 ? candidates.sort((a,b) => a.dist - b.dist)[0].side : 'bottom';
       if (flowDir === 'right') spawnX += GRID_SIZE;
       else spawnY += GRID_SIZE;
       safety++;
     }
 
-    const newItem = { 
-      ...item, 
-      instanceId: newInstanceId, 
-      x: snapToGrid(spawnX, 0), 
-      y: snapToGrid(spawnY, HEADER_OFFSET), 
-      isRegistered: !item.isBuilder 
-    } as CanvasItem;
-    
+    const newItem = { ...item, instanceId: newInstanceId, x: snapToGrid(spawnX, 0), y: snapToGrid(spawnY, HEADER_OFFSET), isRegistered: !item.isBuilder } as CanvasItem;
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
-    // --- Soft Panning Transition ---
     setIsTransitioning(true);
-    // Center the viewport on the newly birthed tile
     const targetVX = windowSize.w / 2 - (newItem.x + 16) * zoom;
     const targetVY = windowSize.h / 2 - (newItem.y - HEADER_OFFSET + 16) * zoom;
     setViewOffset({ x: targetVX, y: targetVY });
@@ -255,7 +228,7 @@ export default function App() {
       const clientX = 'clientX' in e ? e.clientX : (e as TouchEvent).touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : (e as TouchEvent).touches[0].clientY;
       if (dragStartPos && !isDragging) {
-          const dist = Math.sqrt(Math.pow(clientX - dragStartPos.x, 2) + Math.pow(clientX - dragStartPos.y, 2));
+          const dist = Math.sqrt(Math.pow(clientX - dragStartPos.x, 2) + Math.pow(clientY - dragStartPos.y, 2));
           if (dist > DRAG_THRESHOLD) { setIsDragging(true); setDraggingId(dragStartPos.id); if (pressTimer.current) clearTimeout(pressTimer.current); }
       }
       if (!isDragging && !isPanning) return;
@@ -275,14 +248,31 @@ export default function App() {
       setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
       if (isPanning) { setIsPanning(false); return; }
       if (!isDragging) return; 
-      setCanvasItems(prev => prev.map(i => i.instanceId === draggingId ? { ...i, x: snapToGrid(i.x, 0), y: snapToGrid(i.y, HEADER_OFFSET) } : i));
-      if (activeTether) { setConnections(prev => prev.some(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide) ? prev : [...prev, { ...activeTether, id: `conn_${Date.now()}` }]); }
+
+      const finalX = snapToGrid((('clientX' in e ? e.clientX : (e as TouchEvent).changedTouches[0].clientX) - viewOffset.x) / zoom - mouseOffset.current.x, 0);
+      const finalY = snapToGrid((('clientY' in e ? e.clientY : (e as TouchEvent).changedTouches[0].clientY) - viewOffset.y) / zoom - mouseOffset.current.y, HEADER_OFFSET);
+
+      // Check for collision
+      const collision = canvasItems.some(i => i.instanceId !== draggingId && Math.round(i.x) === Math.round(finalX) && Math.round(i.y) === Math.round(finalY));
+
+      const updatedItems = canvasItems.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
+      setCanvasItems(updatedItems);
+      
+      if (activeTether) { 
+        setConnections(prev => prev.some(c => c.sourceId === activeTether.sourceId && c.sourceSide === activeTether.sourceSide && c.targetId === activeTether.targetId && c.targetSide === activeTether.targetSide) ? prev : [...prev, { ...activeTether, id: `conn_${Date.now()}` }]); 
+      }
+      
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
+      
+      // If manual drop results in overlap, trigger a gather to smartly adjust
+      if (collision) {
+        gatherLayout(updatedItems);
+      }
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
-  }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, zoom]);
+  }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, zoom, canvasItems]);
 
   const CompactFolderView = ({ data, side, isOpen, onClose }: { data: FolderData, side: 'left' | 'right', isOpen: boolean, onClose: () => void }) => {
     const [path, setPath] = useState<FolderItem[]>([]);
