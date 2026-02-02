@@ -4,20 +4,19 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Island Gathering Engine v12.0 [Universal Corridor & Terminal Waterfall Isolation]
- * Pure logic for Crossword (Adjacent) and Tether (Spaced) layout organization.
+ * Universal Unified Flow Engine v13.0 [Lane Integrity & Waterfall Isolation]
  * 
  * Rules:
- * 1. Universal Subtree Flow: In Tether mode, Green and Red connections are treated as distinct 
- *    subtree flows that establish and respect horizontal/vertical boundaries.
- * 2. Vertical Lane Isolation (X-axis): Branches are trapped in lanes defined by their parent's 
+ * 1. Mode-Specific Fragmentation: Grid Mode isolates Data/Recursion into corridors. 
+ *    Tether Mode integrates them into a unified execution waterfall.
+ * 2. Indicator Treatment (Blue): Blue recursive lines do not influence layout in Tether mode.
+ * 3. Fuchsia Lane Integration: Data providers respect the vertical slice of their consumer.
+ * 4. Vertical Corridor Isolation (X-axis): Branches are trapped in lanes defined by their parent's 
  *    vertical slice. A branch cannot cross its parent's X-boundary.
- * 3. Horizontal Slice Isolation (Y-axis): Descendants always stay below their parent's horizon 
- *    (minY = parent.y + step).
- * 4. Terminal Waterfall Floor: Ancestor terminal nodes establish a maxY horizontal floor for their 
- *    specific vertical corridor.
- * 5. Terminal Vertical Slice: Descendant terminal nodes define the horizontal footprint of their 
- *    corridor. Expansion at the base pushes parallel sibling or ancestor trees strictly outward.
+ * 5. Horizontal Slice Isolation (Y-axis): Descendants always stay below their parent's horizon.
+ * 6. Terminal Waterfall Floor: Ancestor terminal nodes establish a maxY horizontal floor for their corridor.
+ * 7. Terminal Vertical Slice: Descendant terminal nodes define the horizontal footprint of their 
+ *    corridor, pushing parallel sibling or ancestor trees strictly outward.
  */
 
 export interface LayoutResult {
@@ -37,8 +36,9 @@ export function calculateIslandLayout(
   const occupied = new Set<string>();
   const getPosKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
 
-  const stepSize = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
-  const islandGap = GRID_SIZE * (mode === 'grid' ? 4 : 8);
+  const isGrid = mode === 'grid';
+  const stepSize = isGrid ? GRID_SIZE : GRID_SIZE * 2;
+  const islandGap = GRID_SIZE * (isGrid ? 4 : 8);
 
   // Global registries for Waterfall (Y) and Corridor (X) enforcement
   const corridorFloorY = new Map<number, number>(); // snapToGrid(x) -> maxY floor established by terminal nodes
@@ -46,13 +46,9 @@ export function calculateIslandLayout(
 
   const updateGlobalSpatialState = (x: number, y: number, isTerminal: boolean) => {
     const corridorX = snapToGrid(x, 0);
-    
-    // Update terminal waterfall floor if this is a leaf node
     if (isTerminal) {
       corridorFloorY.set(corridorX, Math.max(corridorFloorY.get(corridorX) || 0, y));
     }
-
-    // Update horizontal breadth per vertical slice
     const snapY = snapToGrid(y, HEADER_OFFSET);
     const current = laneBreadthX.get(snapY) || { min: x, max: x };
     laneBreadthX.set(snapY, {
@@ -61,10 +57,6 @@ export function calculateIslandLayout(
     });
   };
 
-  /**
-   * Directional Collision Resolution
-   * Respects Vertical Lane (minX/maxX), Horizontal Slice (minY), and Waterfall (corridorFloorY) boundaries.
-   */
   const findSafePosition = (
     startX: number, 
     startY: number, 
@@ -75,14 +67,13 @@ export function calculateIslandLayout(
   ) => {
     let tx = startX, ty = Math.max(startY, minY);
     
-    // Enforce Waterfall Floor (Ancestor terminal nodes above this corridor)
+    // Enforce Waterfall Floor
     const corridorX = snapToGrid(tx, 0);
     const floorY = corridorFloorY.get(corridorX) || 0;
-    if (mode === 'tether' && ty < floorY + stepSize) {
+    if (!isGrid && ty < floorY + stepSize) {
       ty = floorY + stepSize;
     }
 
-    // Snap to lane boundaries immediately
     if (tx < minX) tx = minX;
     if (tx > maxX) tx = maxX;
 
@@ -95,34 +86,26 @@ export function calculateIslandLayout(
       } else {
         tx += stepSize;
       }
-      
-      // Re-apply constraints after shift
       if (tx < minX) tx = minX;
       if (tx > maxX) tx = maxX;
       if (ty < minY) ty = minY;
-      
-      // Secondary vertical cascade if horizontal shifts fail to find a gap within a lane
-      if (occupied.has(getPosKey(tx, ty))) {
-        ty += stepSize;
-      }
+      if (occupied.has(getPosKey(tx, ty))) ty += stepSize;
       safety++;
     }
     return { tx, ty };
   };
 
-  // Grid Mode Fragments on Data/Recursion for dense isolation. 
-  // Tether Mode treats them as standard flow but uses strict lane/slice boundaries.
-  const isGrid = mode === 'grid';
+  // In Tether mode, Fuchsia is part of the flow. Blue is an indicator (no layout logic).
   const flowConnections = isGrid 
     ? connections.filter(c => !c.color.includes('fuchsia') && !c.color.includes('blue'))
-    : connections;
+    : connections.filter(c => !c.color.includes('blue'));
 
   const triggers = new Set(newItems.filter(i => i.isTrigger || i.isOrigin).map(i => i.instanceId));
   const rootIds = newItems
     .filter(i => triggers.has(i.instanceId) || !connections.some(c => c.targetId === i.instanceId))
     .map(i => i.instanceId);
 
-  // 1. Pack Isolated Items (Top-Left Industrial Density)
+  // 1. Pack Isolated Items
   const connectedIds = new Set([
     ...connections.map(c => c.sourceId),
     ...connections.map(c => c.targetId)
@@ -144,7 +127,7 @@ export function calculateIslandLayout(
     updateGlobalSpatialState(item.x, item.y, true);
   });
 
-  // 2. Traversal with Universal Subtree Isolation
+  // 2. Traversal
   let currentIslandX = snapToGrid(windowSize.w / 2 - 16, 0);
   const startYBase = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
@@ -156,8 +139,6 @@ export function calculateIslandLayout(
 
   sortedRoots.forEach((root) => {
     if (!root || visited.has(root.instanceId)) return;
-    
-    // Tracks the global horizontal footprint of this specific logic island
     let islandExtentMaxX = currentIslandX;
 
     const processNode = (nodeId: string, cx: number, cy: number, minX: number, maxX: number, minY: number) => {
@@ -186,26 +167,20 @@ export function calculateIslandLayout(
         
         let tx = cx, ty = cy;
         let pushDir: 'left' | 'right' | 'bottom' = 'bottom';
-        
-        // Boundaries established by the vertical slice of the parent tree
-        let childMinX = minX;
-        let childMaxX = maxX;
+        let childMinX = minX, childMaxX = maxX;
         let childMinY = !isGrid ? cy + stepSize : -Infinity;
 
         if (conn.sourceSide === 'bottom') {
           ty += stepSize;
           pushDir = 'bottom';
-          // Stay within current lane
         } else if (conn.sourceSide === 'right') {
           tx += stepSize;
           pushDir = 'right';
-          // LOCK: Descendant branch must stay to the right of this vertical slice
-          if (mode === 'tether') childMinX = Math.max(minX, cx + stepSize);
+          if (!isGrid) childMinX = Math.max(minX, cx + stepSize);
         } else if (conn.sourceSide === 'left') {
           tx -= stepSize;
           pushDir = 'left';
-          // LOCK: Descendant branch must stay to the left of this vertical slice
-          if (mode === 'tether') childMaxX = Math.min(maxX, cx - stepSize);
+          if (!isGrid) childMaxX = Math.min(maxX, cx - stepSize);
         }
 
         const { tx: finalX, ty: finalY } = findSafePosition(
@@ -222,12 +197,9 @@ export function calculateIslandLayout(
     };
 
     processNode(root.instanceId, currentIslandX, startYBase, -Infinity, Infinity, -Infinity);
-    
-    // Vertical Corridor Pushing: Move the next island beyond the footprint of the current waterfall
     currentIslandX = snapToGrid(islandExtentMaxX + islandGap, 0);
   });
 
-  // Focus camera on the logic origin
   const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
   let targetVX = windowSize.w / 2 - (origin ? (origin.x + 16) : 0) * zoom;
   let targetVY = windowSize.h / 2 - (origin ? (origin.y - HEADER_OFFSET + 16) : 0) * zoom;
