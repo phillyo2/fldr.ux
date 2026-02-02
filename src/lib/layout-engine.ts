@@ -11,6 +11,7 @@ import { snapToGrid } from './pathing';
  *    Tether Mode integrates them into a unified execution waterfall.
  * 2. Indicator Treatment (Blue): Blue recursive lines do not influence layout in Tether mode.
  * 3. Fuchsia Lane Integration: Data providers respect the vertical slice of their consumer.
+ *    They stay strictly associated with the node they connect to.
  * 4. Vertical Corridor Isolation (X-axis): Branches are trapped in lanes defined by their parent's 
  *    vertical slice. A branch cannot cross its parent's X-boundary.
  * 5. Horizontal Slice Isolation (Y-axis): Descendants always stay below their parent's horizon.
@@ -158,8 +159,8 @@ export function calculateIslandLayout(
       }
 
       const sortedOutgoing = outgoing.sort((a, b) => {
-        const order = { 'bottom': 0, 'right': 1, 'left': 2 };
-        return (order[a.sourceSide as keyof typeof order] || 3) - (order[b.sourceSide as keyof typeof order] || 3);
+        const order = { 'bottom': 0, 'right': 1, 'left': 2, 'top': 3 };
+        return (order[a.sourceSide as keyof typeof order] || 4) - (order[b.sourceSide as keyof typeof order] || 4);
       });
 
       sortedOutgoing.forEach(conn => {
@@ -181,6 +182,10 @@ export function calculateIslandLayout(
           tx -= stepSize;
           pushDir = 'left';
           if (!isGrid) childMaxX = Math.min(maxX, cx - stepSize);
+        } else if (conn.sourceSide === 'top') {
+          ty -= stepSize;
+          pushDir = 'bottom';
+          // Fuchsia providers are "strictly associated" but stay in flow.
         }
 
         const { tx: finalX, ty: finalY } = findSafePosition(
