@@ -4,7 +4,11 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Universal Unified Flow Engine v17.0 [Red Subtree Lane Integrity & Centrifugal Isolation]
+ * Universal Unified Flow Engine v18.0 [Sidecar Boundary & Centrifugal Lane Integrity]
+ * 
+ * - Sidecars (Fuchsia) now actively push subtree boundaries to the right.
+ * - Red Subtree Lane Integrity handles horizontal corridor isolation.
+ * - Emerald Subflows maintain vertical spine clearance.
  */
 
 export interface LayoutResult {
@@ -120,6 +124,7 @@ export function calculateIslandLayout(
     if (!node) return;
 
     // Tether Mode Sidecar Integration (Fuchsia)
+    const hasCurrentSidecar = !isGrid && connections.some(c => c.targetId === nodeId && c.color.includes('fuchsia'));
     if (!isGrid) {
       const dataProviders = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
       dataProviders.forEach(conn => {
@@ -154,7 +159,12 @@ export function calculateIslandLayout(
       
       let tx = cx, ty = cy;
       let pushDir: 'left' | 'right' | 'bottom' = 'bottom';
-      let childMinX = minX, childMaxX = maxX;
+      
+      // Sidecar Boundary Persistence: If parent has a sidecar, push children further to the right
+      // to avoid subtree logic wrapping back under the data provider.
+      const boundaryPush = hasCurrentSidecar ? (stepSize / 2) : 0;
+      let childMinX = minX + boundaryPush;
+      let childMaxX = maxX;
       let childMinY = !isGrid ? cy + stepSize : -Infinity;
 
       if (conn.sourceSide === 'bottom') {
@@ -165,7 +175,7 @@ export function calculateIslandLayout(
         pushDir = 'right';
         // Red Subtree Lane Integrity: Lock to right lane to clear room for left subflows
         if (!isGrid) {
-          childMinX = Math.max(minX, cx + stepSize);
+          childMinX = Math.max(childMinX, cx + stepSize);
         }
       } else if (conn.sourceSide === 'left') {
         tx -= stepSize;
@@ -176,7 +186,8 @@ export function calculateIslandLayout(
         pushDir = 'bottom';
       }
 
-      const hasSidecar = !isGrid && connections.some(c => c.targetId === conn.targetId && c.color.includes('fuchsia'));
+      // Proactive Sidecar detection for the target node
+      const hasTargetSidecar = !isGrid && connections.some(c => c.targetId === conn.targetId && c.color.includes('fuchsia'));
 
       const { tx: finalX, ty: finalY } = findSafePosition(
         snapToGrid(tx, 0), 
@@ -185,7 +196,7 @@ export function calculateIslandLayout(
         childMinX,
         childMaxX,
         childMinY,
-        hasSidecar
+        hasTargetSidecar
       );
 
       processNode(conn.targetId, finalX, finalY, childMinX, childMaxX, childMinY, islandState);
