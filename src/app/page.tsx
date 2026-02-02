@@ -11,7 +11,7 @@ import {
   HEADER_OFFSET, SNAP_TOLERANCE, DETECTION_RANGE, 
   DRAG_THRESHOLD, LONG_PRESS_MS, LATCH_POINTS, GRID_SIZE 
 } from '@/lib/constants';
-import { getSmartPath, snapToGrid, isAncestor } from '@/lib/pathing';
+import { getSmartPath, snapToGrid } from '@/lib/pathing';
 import { calculateGhostHandshakes, getPortState, getTreeContext } from '@/lib/handshake-engine';
 import { calculateIslandLayout } from '@/lib/layout-engine';
 
@@ -137,6 +137,7 @@ export default function App() {
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
 
+    // Entry points trigger a full workflow gather
     if (item.isTrigger) {
       const newItem = { 
         ...item, 
@@ -152,6 +153,7 @@ export default function App() {
       return;
     }
 
+    // Standard logic tiles spawn near existing tree anchors
     let spawnX = screenCenterX;
     let spawnY = screenCenterY;
     const candidates: {x: number, y: number, dist: number, side: string}[] = [];
@@ -176,12 +178,11 @@ export default function App() {
       spawnY = best.y + HEADER_OFFSET - 16;
     }
 
+    // Occupancy check for spawning
     let safety = 0;
     const occupied = new Set(canvasItems.map(i => `${snapToGrid(i.x, 0)},${snapToGrid(i.y, HEADER_OFFSET)}`));
     while (occupied.has(`${snapToGrid(spawnX, 0)},${snapToGrid(spawnY, HEADER_OFFSET)}`) && safety < 100) {
-      const flowDir = candidates.length > 0 ? candidates.sort((a,b) => a.dist - b.dist)[0].side : 'bottom';
-      if (flowDir === 'right') spawnX += GRID_SIZE;
-      else spawnY += GRID_SIZE;
+      spawnX += GRID_SIZE;
       safety++;
     }
 
@@ -252,7 +253,6 @@ export default function App() {
       const finalX = snapToGrid((('clientX' in e ? e.clientX : (e as TouchEvent).changedTouches[0].clientX) - viewOffset.x) / zoom - mouseOffset.current.x, 0);
       const finalY = snapToGrid((('clientY' in e ? e.clientY : (e as TouchEvent).changedTouches[0].clientY) - viewOffset.y) / zoom - mouseOffset.current.y, HEADER_OFFSET);
 
-      // Check for collision
       const collision = canvasItems.some(i => i.instanceId !== draggingId && Math.round(i.x) === Math.round(finalX) && Math.round(i.y) === Math.round(finalY));
 
       const updatedItems = canvasItems.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
@@ -264,7 +264,7 @@ export default function App() {
       
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
       
-      // If manual drop results in overlap, trigger a gather to smartly adjust
+      // If manual drop results in overlap, trigger a gather to smartly adjust the entire flow
       if (collision) {
         gatherLayout(updatedItems);
       }
