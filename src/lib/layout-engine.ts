@@ -4,7 +4,7 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid, isAncestor } from './pathing';
 
 /**
- * Island Gathering Engine v2.0 [Black Boxed]
+ * Island Gathering Engine v2.1 [Directional Shifting & Collision Avoidance]
  * Pure logic for Crossword (Adjacent) and Tether (Spaced) layout organization.
  */
 
@@ -25,11 +25,22 @@ export function calculateIslandLayout(
   const occupied = new Set<string>();
   const getPosKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
 
-  const findSafePosition = (startX: number, startY: number, stepX: number, stepY: number) => {
+  // Tether mode enforces mandatory spacing (2 grid units)
+  // Grid mode allows adjacency (1 grid unit)
+  const stepSize = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+
+  /**
+   * Smart Occupancy Adjustment
+   * If a cell is taken, search in the intended direction of flow to push the subtree.
+   */
+  const findSafePosition = (startX: number, startY: number, direction: 'left' | 'right' | 'bottom') => {
     let tx = startX, ty = startY;
     let safety = 0;
     while (occupied.has(getPosKey(tx, ty)) && safety < 1000) {
-      tx += stepX; ty += stepY; safety++;
+      if (direction === 'bottom') ty += GRID_SIZE;
+      else if (direction === 'left') tx -= GRID_SIZE;
+      else if (direction === 'right') tx += GRID_SIZE;
+      safety++;
     }
     return { tx, ty };
   };
@@ -47,8 +58,13 @@ export function calculateIslandLayout(
   // 1. Standalone Grid (Top-Left Island)
   let sx = 64, sy = 120;
   standalone.forEach((item, idx) => {
-    item.x = snapToGrid(sx + (idx % 8) * GRID_SIZE, 0);
-    item.y = snapToGrid(sy + Math.floor(idx / 8) * GRID_SIZE, HEADER_OFFSET);
+    const { tx, ty } = findSafePosition(
+      snapToGrid(sx + (idx % 8) * GRID_SIZE, 0),
+      snapToGrid(sy + Math.floor(idx / 8) * GRID_SIZE, HEADER_OFFSET),
+      'right'
+    );
+    item.x = tx;
+    item.y = ty;
     occupied.add(getPosKey(item.x, item.y));
     visited.add(item.instanceId);
   });
@@ -64,43 +80,56 @@ export function calculateIslandLayout(
   });
 
   sortedRoots.forEach((root) => {
-    let maxNodeXForThisTree = currentFlowX;
+    let islandMaxX = currentFlowX;
     
     const processNode = (nodeId: string, cx: number, cy: number) => {
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
-      occupied.add(getPosKey(cx, cy));
-      maxNodeXForThisTree = Math.max(maxNodeXForThisTree, cx);
       
       const node = newItems.find(i => i.instanceId === nodeId);
-      if (node) { node.x = cx; node.y = cy; }
+      if (node) { 
+        node.x = cx; 
+        node.y = cy; 
+        occupied.add(getPosKey(cx, cy));
+        islandMaxX = Math.max(islandMaxX, cx);
+      }
 
+      // Priority order for flow: Bottom (Green), then Right (Red), then Left (Yellow)
       const outgoing = connections.filter(c => c.sourceId === nodeId);
-      outgoing.forEach(conn => {
+      const sortedOutgoing = [...outgoing].sort((a, b) => {
+        const order = { bottom: 0, right: 1, left: 2, top: 3 };
+        return (order[a.sourceSide as keyof typeof order] ?? 4) - (order[b.sourceSide as keyof typeof order] ?? 4);
+      });
+
+      sortedOutgoing.forEach(conn => {
         if (visited.has(conn.targetId)) return;
         
-        // Mode-based spacing
-        let step = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
-        
-        // RULE: Recursive connections (Blue) NEVER snap adjacent
-        const isRecursive = conn.color.includes('blue') || isAncestor(conn.targetId, conn.sourceId, connections);
-        if (isRecursive) {
-          step = GRID_SIZE * 2; 
+        let tx = cx, ty = cy;
+        let pushDir: 'left' | 'right' | 'bottom' = 'bottom';
+
+        if (conn.sourceSide === 'bottom') {
+          ty += stepSize;
+          pushDir = 'bottom';
+        } else if (conn.sourceSide === 'right') {
+          tx += stepSize;
+          pushDir = 'right';
+        } else if (conn.sourceSide === 'left') {
+          tx -= stepSize;
+          pushDir = 'left';
+        } else if (conn.sourceSide === 'top') {
+          ty -= stepSize;
+          pushDir = 'bottom';
         }
 
-        let tx = cx, ty = cy;
-        if (conn.sourceSide === 'bottom') ty += step;
-        else if (conn.sourceSide === 'right') tx += step;
-        else if (conn.sourceSide === 'left') tx -= step;
-        else if (conn.sourceSide === 'top') ty -= step;
-
-        const { tx: finalX, ty: finalY } = findSafePosition(snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), 0, GRID_SIZE);
+        // Apply directional shifting if position is taken
+        const { tx: finalX, ty: finalY } = findSafePosition(snapToGrid(tx, 0), snapToGrid(ty, HEADER_OFFSET), pushDir);
         processNode(conn.targetId, finalX, finalY);
       });
     };
 
     processNode(root.instanceId, currentFlowX, startY);
-    currentFlowX = snapToGrid(maxNodeXForThisTree + GRID_SIZE * 4, 0);
+    // Dynamic island pushing: ensure next root has space based on width of current tree
+    currentFlowX = snapToGrid(islandMaxX + GRID_SIZE * 6, 0);
   });
 
   // Camera Pan to Origin
