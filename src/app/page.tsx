@@ -43,16 +43,22 @@ export default function App() {
     icon: 'Package',
     color: 'bg-slate-900',
     items: [
+      { name: 'Triggers', icon: 'Radio', isFolder: true, items: [
+          { name: 'WebHook', icon: 'Globe', isTrigger: true },
+          { name: 'Cron Job', icon: 'Clock', isTrigger: true },
+          { name: 'Auth Event', icon: 'Shield', isTrigger: true }
+      ] },
       { name: 'Actions', icon: 'Zap', isFolder: true, items: [
         { name: 'Logic', icon: 'Code2', isFolder: true, items: [
             { name: 'Circuit Breaker', icon: 'Shuffle' }
         ] },
-        { name: 'Triggers', icon: 'Radio', isFolder: true, items: [
-            { name: 'WebHook', icon: 'Globe', isTrigger: true }
-        ] },
         { name: 'Notify', icon: 'Bell' },
         { name: 'Log', icon: 'Terminal' }
       ] },
+      { name: 'Logic', icon: 'Layers', isFolder: true, items: [
+        { name: 'Branch', icon: 'GitBranch' },
+        { name: 'Loop', icon: 'Repeat' }
+      ]},
       { name: 'Modifiers', icon: 'Settings', isFolder: true, color: 'bg-amber-500', items: [
         { name: 'Env Vars', icon: 'Globe' },
         { name: 'RBAC', icon: 'Shield' },
@@ -133,25 +139,10 @@ export default function App() {
     setTimeout(() => setIsTransitioning(false), 500);
   };
 
-  const handleSmartBirth = (item: FolderItem) => {
+  const handleSmartBirth = (item: FolderItem | { name: string, icon: string, isRegistered: boolean, isTrigger?: boolean }) => {
     const newInstanceId = `inst_${Date.now()}`;
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
-
-    if (item.isTrigger) {
-      const newItem = { 
-        ...item, 
-        instanceId: newInstanceId, 
-        x: screenCenterX, 
-        y: screenCenterY + HEADER_OFFSET, 
-        isRegistered: true
-      } as CanvasItem;
-      const updatedItems = [...canvasItems, newItem];
-      setCanvasItems(updatedItems);
-      setActiveFolderView(null);
-      gatherLayout(updatedItems);
-      return;
-    }
 
     let spawnX = screenCenterX;
     let spawnY = screenCenterY;
@@ -184,15 +175,41 @@ export default function App() {
       safety++;
     }
 
-    const newItem = { ...item, instanceId: newInstanceId, x: snapToGrid(spawnX, 0), y: snapToGrid(spawnY, HEADER_OFFSET), isRegistered: true } as CanvasItem;
+    const newItem = { 
+      ...item, 
+      instanceId: newInstanceId, 
+      x: snapToGrid(spawnX, 0), 
+      y: snapToGrid(spawnY, HEADER_OFFSET), 
+      isRegistered: item.isRegistered ?? true 
+    } as CanvasItem;
+    
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
+    // No Auto-Gathering on spawn
     setIsTransitioning(true);
     const targetVX = windowSize.w / 2 - (newItem.x + 16) * zoom;
     const targetVY = windowSize.h / 2 - (newItem.y - HEADER_OFFSET + 16) * zoom;
     setViewOffset({ x: targetVX, y: targetVY });
     setTimeout(() => setIsTransitioning(false), 500);
+  };
+
+  const handleToolboxItemClick = (item: FolderItem) => {
+    if (item.isFolder) {
+      setFolderPath(prev => [...prev, item]);
+    } else if (editingItem) {
+      // Placeholder Initialization Workflow
+      setCanvasItems(prev => prev.map(i => 
+        i.instanceId === editingItem.instanceId 
+          ? { ...i, ...item, isRegistered: true } 
+          : i
+      ));
+      setEditingItem(null);
+      setActiveFolderView(null);
+      setFolderPath([]);
+    } else {
+      handleSmartBirth(item);
+    }
   };
 
   const handleCanvasPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
@@ -215,8 +232,10 @@ export default function App() {
       clearTimeout(pressTimer.current);
       if (!isDragging && !isPanning) {
         if (!item.isRegistered) {
-           setEditingItem(item); setStudioName(item.name || ""); setStudioIcon(item.icon || "Terminal");
-           setStudioPayload(""); setIsStudioOpen(true);
+           // Clicking a placeholder opens the toolbox
+           setEditingItem(item);
+           setActiveFolderView('toolbox');
+           setFolderPath([]);
         }
       }
     }
@@ -251,8 +270,6 @@ export default function App() {
       const finalX = snapToGrid((('clientX' in e ? e.clientX : (e as TouchEvent).changedTouches[0].clientX) - viewOffset.x) / zoom - mouseOffset.current.x, 0);
       const finalY = snapToGrid((('clientY' in e ? e.clientY : (e as TouchEvent).changedTouches[0].clientY) - viewOffset.y) / zoom - mouseOffset.current.y, HEADER_OFFSET);
 
-      const collision = canvasItems.some(i => i.instanceId !== draggingId && Math.round(i.x) === Math.round(finalX) && Math.round(i.y) === Math.round(finalY));
-
       const updatedItems = canvasItems.map(i => i.instanceId === draggingId ? { ...i, x: finalX, y: finalY } : i);
       setCanvasItems(updatedItems);
       
@@ -261,10 +278,6 @@ export default function App() {
       }
       
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
-      
-      if (collision) {
-        gatherLayout(updatedItems);
-      }
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
@@ -288,7 +301,7 @@ export default function App() {
         </div>
         <div className="p-3 bg-slate-50 grid grid-cols-3 gap-3">
           {currentItems.map((item, i) => (
-            <div key={i} onClick={() => item.isFolder ? setPath(p => [...p, item]) : (item.id ? setCurrentPageId(item.id) : handleSmartBirth(item))} className="flex flex-col items-center gap-1 cursor-pointer group">
+            <div key={i} onClick={() => item.isFolder ? setPath(p => [...p, item]) : (item.id ? setCurrentPageId(item.id) : handleToolboxItemClick(item))} className="flex flex-col items-center gap-1 cursor-pointer group">
               <div className={`w-10 h-10 rounded-lg flex items-center justify-center border transition-all ${item.isFolder ? 'bg-slate-100 border-slate-200 text-slate-400' : 'bg-white border-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white shadow-sm'}`}>
                 <SafeIcon name={item.icon || (item.isFolder ? 'Folder' : 'Zap')} size={16} />
               </div>
@@ -366,14 +379,14 @@ export default function App() {
       <div onClick={() => setZoom(prev => Math.max(0.5, prev - 0.1))} className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Minus size={20} className="text-slate-700" /></div>
       
       <div className="fixed bottom-[28px] left-[28px] z-[700] flex gap-2">
-        <div onClick={() => handleSmartBirth({ name: 'Entry Point', icon: 'Shield', isTrigger: true })} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="New Entry Point"><Shield size={20} className="text-white" /></div>
-        <div onClick={() => { setActiveFolderView('toolbox'); setFolderPath([toolboxData.items[0]]); }} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="New Action"><Plus size={20} className="text-white" /></div>
         <div onClick={() => { setActiveFolderView(v => v === 'toolbox' ? null : 'toolbox'); setFolderPath([]); }} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="Toolbox"><Folder size={20} className="text-white" /></div>
+        <div onClick={() => handleSmartBirth({ name: 'Entry Point', icon: 'Shield', isRegistered: true, isOrigin: true })} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="New Entry Point"><Shield size={20} className="text-white" /></div>
+        <div onClick={() => handleSmartBirth({ name: 'New Node', icon: 'Plus', isRegistered: false })} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="New Placeholder"><Plus size={20} className="text-white" /></div>
       </div>
 
       <div onClick={() => setActiveFolderView(v => v === 'nav' ? null : 'nav')} className="fixed bottom-[28px] right-[28px] z-[700] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-blue-700"><Compass size={20} className="text-white" /></div>
       
-      <CompactFolderView data={toolboxData} side="left" isOpen={activeFolderView === 'toolbox'} onClose={() => setActiveFolderView(null)} path={folderPath} setPath={setFolderPath} />
+      <CompactFolderView data={toolboxData} side="left" isOpen={activeFolderView === 'toolbox'} onClose={() => { setActiveFolderView(null); setEditingItem(null); }} path={folderPath} setPath={setFolderPath} />
       <CompactFolderView data={navData} side="right" isOpen={activeFolderView === 'nav'} onClose={() => { setActiveFolderView(null); setFolderPath([]); }} path={folderPath} setPath={setFolderPath} />
 
       {isStudioOpen && (
