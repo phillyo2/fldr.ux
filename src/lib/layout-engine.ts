@@ -4,7 +4,7 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Universal Unified Flow Engine v14.0 [Strict Lane Integrity & Data Sidecar Alignment]
+ * Universal Unified Flow Engine v15.0 [Strict Lane Integrity & Waterfall Sidecar Alignment]
  */
 
 export interface LayoutResult {
@@ -28,6 +28,7 @@ export function calculateIslandLayout(
   const stepSize = isGrid ? GRID_SIZE : GRID_SIZE * 2;
   const islandGap = GRID_SIZE * (isGrid ? 4 : 8);
 
+  // Tracking for "Down and Out" Waterfall enforcement
   const corridorFloorY = new Map<number, number>(); 
   const laneBreadthX = new Map<number, { min: number, max: number }>(); 
 
@@ -50,7 +51,8 @@ export function calculateIslandLayout(
     direction: 'left' | 'right' | 'bottom',
     minX: number = -Infinity,
     maxX: number = Infinity,
-    minY: number = -Infinity
+    minY: number = -Infinity,
+    hasSidecar: boolean = false
   ) => {
     let tx = startX, ty = Math.max(startY, minY);
     
@@ -60,11 +62,18 @@ export function calculateIslandLayout(
       ty = floorY + stepSize;
     }
 
+    // Apply strict lane boundaries
     if (tx < minX) tx = minX;
     if (tx > maxX) tx = maxX;
 
     let safety = 0;
-    while (occupied.has(getPosKey(tx, ty)) && safety < 1000) {
+    const isOccupied = (x: number, y: number) => {
+      if (occupied.has(getPosKey(x, y))) return true;
+      if (hasSidecar && occupied.has(getPosKey(x - stepSize / 2, y - stepSize / 2))) return true;
+      return false;
+    };
+
+    while (isOccupied(tx, ty) && safety < 1000) {
       if (direction === 'bottom') {
         ty += stepSize;
       } else if (direction === 'left') {
@@ -72,28 +81,28 @@ export function calculateIslandLayout(
       } else {
         tx += stepSize;
       }
+      
+      // Re-enforce boundaries after push
       if (tx < minX) tx = minX;
       if (tx > maxX) tx = maxX;
       if (ty < minY) ty = minY;
-      if (occupied.has(getPosKey(tx, ty))) ty += stepSize;
+      
+      // Check for overlap after push
+      if (isOccupied(tx, ty)) ty += stepSize;
       safety++;
     }
     return { tx, ty };
   };
 
-  // Grid Mode Fragments on Data/Recursion. Tether Mode Integrates.
+  // 1. Connection Filtering: Grid mode fragments, Tether view integrates Fuchsia
   const flowConnections = isGrid 
     ? connections.filter(c => !c.color.includes('fuchsia') && !c.color.includes('blue'))
-    : connections.filter(c => !c.color.includes('blue'));
+    : connections.filter(c => !c.color.includes('blue')); // Blue is just an indicator in Tether
 
   const triggers = new Set(newItems.filter(i => i.isTrigger || i.isOrigin).map(i => i.instanceId));
   const rootIds = newItems
     .filter(i => triggers.has(i.instanceId) || !connections.some(c => c.targetId === i.instanceId))
     .map(i => i.instanceId);
-
-  // 1. Traverse and Layout Primary Trees
-  let currentIslandX = snapToGrid(windowSize.w / 2 - 16, 0);
-  const startYBase = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
   const sortedRoots = rootIds.map(id => newItems.find(i => i.instanceId === id)!).sort((a, b) => {
     if (a.isOrigin || a.isTrigger) return -1;
@@ -108,6 +117,20 @@ export function calculateIslandLayout(
     const node = newItems.find(i => i.instanceId === nodeId);
     if (!node) return;
 
+    // Place Fuchsia Providers "Up and Left" in Tether View
+    if (!isGrid) {
+      const dataProviders = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
+      dataProviders.forEach(conn => {
+        const provider = newItems.find(i => i.instanceId === conn.sourceId);
+        if (provider && !visited.has(provider.instanceId)) {
+          visited.add(provider.instanceId);
+          provider.x = cx - (stepSize / 2);
+          provider.y = cy - (stepSize / 2);
+          occupied.add(getPosKey(provider.x, provider.y));
+        }
+      });
+    }
+
     node.x = cx; 
     node.y = cy; 
     occupied.add(getPosKey(cx, cy));
@@ -117,7 +140,6 @@ export function calculateIslandLayout(
     const isTerminal = outgoing.length === 0;
     updateGlobalSpatialState(cx, cy, isTerminal);
 
-    // Prioritize child layout while maintaining lane boundaries
     const sortedOutgoing = outgoing.sort((a, b) => {
       const order = { 'bottom': 0, 'right': 1, 'left': 2, 'top': 3 };
       return (order[a.sourceSide as keyof typeof order] || 4) - (order[b.sourceSide as keyof typeof order] || 4);
@@ -137,15 +159,17 @@ export function calculateIslandLayout(
       } else if (conn.sourceSide === 'right') {
         tx += stepSize;
         pushDir = 'right';
-        if (!isGrid) childMinX = Math.max(minX, cx + stepSize);
+        if (!isGrid) childMinX = Math.max(minX, cx + stepSize); // Lock to right lane
       } else if (conn.sourceSide === 'left') {
         tx -= stepSize;
         pushDir = 'left';
-        if (!isGrid) childMaxX = Math.min(maxX, cx - stepSize);
+        if (!isGrid) childMaxX = Math.min(maxX, cx - stepSize); // Lock to left lane
       } else if (conn.sourceSide === 'top') {
-        ty -= stepSize; // Providers sit above or aligned
+        ty -= stepSize;
         pushDir = 'bottom';
       }
+
+      const hasSidecar = !isGrid && connections.some(c => c.targetId === conn.targetId && c.color.includes('fuchsia'));
 
       const { tx: finalX, ty: finalY } = findSafePosition(
         snapToGrid(tx, 0), 
@@ -153,12 +177,17 @@ export function calculateIslandLayout(
         pushDir,
         childMinX,
         childMaxX,
-        childMinY
+        childMinY,
+        hasSidecar
       );
 
       processNode(conn.targetId, finalX, finalY, childMinX, childMaxX, childMinY, islandState);
     });
   };
+
+  // 2. Traversal Loop
+  let currentIslandX = snapToGrid(windowSize.w / 2 - 16, 0);
+  const startYBase = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
   sortedRoots.forEach((root) => {
     if (!root || visited.has(root.instanceId)) return;
@@ -167,7 +196,7 @@ export function calculateIslandLayout(
     currentIslandX = snapToGrid(islandState.maxX + islandGap, 0);
   });
 
-  // 2. Pack Isolated Items
+  // 3. Pack Isolated Items
   const connectedIds = new Set(visited);
   const standalone = newItems.filter(i => !connectedIds.has(i.instanceId));
 
