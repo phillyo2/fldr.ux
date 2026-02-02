@@ -3,10 +3,10 @@ import { LATCH_POINTS, DETECTION_RANGE } from './constants';
 import { isAncestor } from './pathing';
 
 /**
- * Handshake Engine v1.4
+ * Handshake Engine v1.5
  * Pure logic for node connections, tether colors, and port states.
- * Rule enforced: Only one connection allowed per output anchor.
  * Trigger Protocol: Triggers only connect to Origins via Orange lines.
+ * Ambiguous Protocol: Placeholders on Entry Point inputs render as Gray.
  */
 
 export const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
@@ -56,10 +56,8 @@ export const calculateGhostHandshakes = (
     if (other.instanceId === dId) return;
     
     LATCH_POINTS.forEach(lSource => {
-      // RULE: Only one connection per output anchor (bottom/right)
       const isOutputAnchor = lSource.id === 'bottom' || lSource.id === 'right';
       
-      // Check normal case: Dragging node is the source
       if (isOutputAnchor && connections.some(c => c.sourceId === dId && c.sourceSide === lSource.id)) {
         // Output occupied
       } else {
@@ -72,10 +70,15 @@ export const calculateGhostHandshakes = (
           let color = lSource.color.replace('bg-', '');
           let valid = false;
 
-          // TRIGGER SPECIAL CASE: Trigger (Bottom) -> Origin (Top)
-          if (dragNode.isTrigger && other.isOrigin && lSource.id === 'bottom' && lTarget.id === 'top') {
-            valid = true;
-            color = 'amber-500'; // Orange connection
+          // TRIGGER/PLACEHOLDER SPECIAL CASE: To Entry Point Top
+          if (other.isOrigin && lSource.id === 'bottom' && lTarget.id === 'top') {
+            if (dragNode.isTrigger) {
+              valid = true;
+              color = 'amber-500'; // Orange connection for Trigger
+            } else if (!dragNode.isRegistered) {
+              valid = true;
+              color = 'slate-300'; // Gray connection for Placeholder
+            }
           } 
           // STANDARD FLOW
           else if (!dragNode.isTrigger && !other.isTrigger) {
@@ -96,7 +99,7 @@ export const calculateGhostHandshakes = (
         }
       }
 
-      // Check inverted case: Existing node (other) is the source
+      // Inverted case: other is the source
       if (isOutputAnchor && connections.some(c => c.sourceId === other.instanceId && c.sourceSide === lSource.id)) {
         // Output occupied
       } else {
@@ -109,12 +112,15 @@ export const calculateGhostHandshakes = (
           let color = lSource.color.replace('bg-', '');
           let valid = false;
 
-          // TRIGGER SPECIAL CASE: Other Trigger (Bottom) -> Dragged Origin (Top)
-          if (other.isTrigger && dragNode.isOrigin && lSource.id === 'bottom' && lTarget.id === 'top') {
-            valid = true;
-            color = 'amber-500';
+          if (dragNode.isOrigin && lSource.id === 'bottom' && lTarget.id === 'top') {
+            if (other.isTrigger) {
+              valid = true;
+              color = 'amber-500';
+            } else if (!other.isRegistered) {
+              valid = true;
+              color = 'slate-300';
+            }
           }
-          // STANDARD FLOW
           else if (!other.isTrigger && !dragNode.isTrigger) {
             const otherCtx = getTreeContext(other.instanceId, connections);
             if (otherCtx && !dragCtx && lSource.id !== 'top') {
@@ -141,7 +147,6 @@ export const getPortState = (
   connections: Connection[], 
   activeTether: Connection | null
 ) => {
-  // TRIGGER PORT RESTRICTION: Triggers only have a bottom port
   if (item.isTrigger && lp.id !== 'bottom') {
     return { dotColor: 'bg-transparent', isActive: false };
   }
@@ -161,7 +166,12 @@ export const getPortState = (
     if (lp.id === 'bottom') {
       const isOrange = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('amber'));
       const activeIsOrange = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('amber');
-      dotColor = (isOrange || activeIsOrange) ? 'bg-amber-500' : 'bg-emerald-500';
+      const isGray = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('slate'));
+      const activeIsGray = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('slate');
+      
+      if (isOrange || activeIsOrange) dotColor = 'bg-amber-500';
+      else if (isGray || activeIsGray) dotColor = 'bg-slate-300';
+      else dotColor = 'bg-emerald-500';
     }
     else if (lp.id === 'right') dotColor = 'bg-rose-500';
     else if (lp.id === 'left') dotColor = 'bg-amber-400';
@@ -170,8 +180,11 @@ export const getPortState = (
       const activeIsFuchsia = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia');
       const isOrangeInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('amber'));
       const activeIsOrangeInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('amber');
+      const isGrayInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('slate'));
+      const activeIsGrayInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('slate');
       
       if (isOrangeInput || activeIsOrangeInput) dotColor = 'bg-amber-500';
+      else if (isGrayInput || activeIsGrayInput) dotColor = 'bg-slate-300';
       else if (isFuchsia || activeIsFuchsia) dotColor = 'bg-fuchsia-500';
       else dotColor = 'bg-blue-500';
     }

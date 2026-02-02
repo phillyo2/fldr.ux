@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -90,9 +89,6 @@ export default function App() {
 
   const [editingItem, setEditingItem] = useState<CanvasItem | null>(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
-  const [studioName, setStudioName] = useState("");
-  const [studioIcon, setStudioIcon] = useState("Terminal");
-  const [studioPayload, setStudioPayload] = useState("");
 
   useEffect(() => {
     const w = typeof window !== 'undefined' ? window.innerWidth : 1024;
@@ -186,7 +182,6 @@ export default function App() {
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
-    // No Auto-Gathering on spawn
     setIsTransitioning(true);
     const targetVX = windowSize.w / 2 - (newItem.x + 16) * zoom;
     const targetVY = windowSize.h / 2 - (newItem.y - HEADER_OFFSET + 16) * zoom;
@@ -198,12 +193,22 @@ export default function App() {
     if (item.isFolder) {
       setFolderPath(prev => [...prev, item]);
     } else if (editingItem) {
-      // Placeholder Initialization Workflow
+      // Resolve Placeholder initialization
       setCanvasItems(prev => prev.map(i => 
         i.instanceId === editingItem.instanceId 
           ? { ...i, ...item, isRegistered: true } 
           : i
       ));
+      
+      // Update any existing orange connections if the item became a trigger
+      if (item.isTrigger) {
+        setConnections(prev => prev.map(c => 
+          c.sourceId === editingItem.instanceId && c.color.includes('slate') 
+            ? { ...c, color: 'amber-500' } 
+            : c
+        ));
+      }
+      
       setEditingItem(null);
       setActiveFolderView(null);
       setFolderPath([]);
@@ -232,7 +237,6 @@ export default function App() {
       clearTimeout(pressTimer.current);
       if (!isDragging && !isPanning) {
         if (!item.isRegistered) {
-           // Clicking a placeholder opens the toolbox
            setEditingItem(item);
            setActiveFolderView('toolbox');
            setFolderPath([]);
@@ -286,8 +290,12 @@ export default function App() {
 
   const CompactFolderView = ({ data, side, isOpen, onClose, path, setPath }: { data: FolderData, side: 'left' | 'right', isOpen: boolean, onClose: () => void, path: FolderItem[], setPath: React.Dispatch<React.SetStateAction<FolderItem[]>> }) => {
     if (!isOpen) return null;
-    const currentItems = path.length > 0 ? path[path.length - 1].items || [] : data.items;
+    let currentItems = path.length > 0 ? path[path.length - 1].items || [] : data.items;
     const currentTitle = path.length > 0 ? path[path.length - 1].name : data.title;
+
+    // AMBIGUOUS RE-INIT FILTERING:
+    // If we're editing a placeholder docked to an entry point top port, only allow Triggers and Data Providers
+    const isEditingAmbiguousTop = editingItem && connections.some(c => c.sourceId === editingItem.instanceId && c.sourceSide === 'bottom' && c.targetSide === 'top' && canvasItems.find(i => i.instanceId === c.targetId)?.isOrigin);
 
     return (
       <div className={`fixed bottom-[68px] ${side === 'left' ? 'left-[28px]' : 'right-[28px]'} z-[600] w-64 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-bottom-2 duration-200`}>
@@ -300,14 +308,24 @@ export default function App() {
           <button onClick={onClose} className="hover:bg-white/10 p-1 rounded-full"><X size={14}/></button>
         </div>
         <div className="p-3 bg-slate-50 grid grid-cols-3 gap-3">
-          {currentItems.map((item, i) => (
-            <div key={i} onClick={() => item.isFolder ? setPath(p => [...p, item]) : (item.id ? setCurrentPageId(item.id) : handleToolboxItemClick(item))} className="flex flex-col items-center gap-1 cursor-pointer group">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center border transition-all ${item.isFolder ? 'bg-slate-100 border-slate-200 text-slate-400' : 'bg-white border-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white shadow-sm'}`}>
-                <SafeIcon name={item.icon || (item.isFolder ? 'Folder' : 'Zap')} size={16} />
+          {currentItems.map((item, i) => {
+            const isRestricted = isEditingAmbiguousTop && !item.isTrigger && !item.isFolder && item.name !== 'Env Vars';
+            return (
+              <div 
+                key={i} 
+                onClick={() => {
+                  if (isRestricted) return;
+                  item.isFolder ? setPath(p => [...p, item]) : (item.id ? setCurrentPageId(item.id) : handleToolboxItemClick(item));
+                }} 
+                className={`flex flex-col items-center gap-1 cursor-pointer group ${isRestricted ? 'opacity-30 cursor-not-allowed grayscale' : ''}`}
+              >
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center border transition-all ${item.isFolder ? 'bg-slate-100 border-slate-200 text-slate-400' : 'bg-white border-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white shadow-sm'}`}>
+                  <SafeIcon name={item.icon || (item.isFolder ? 'Folder' : 'Zap')} size={16} />
+                </div>
+                <span className="text-[8px] font-bold uppercase text-slate-400 group-hover:text-slate-900 truncate w-full text-center">{item.name}</span>
               </div>
-              <span className="text-[8px] font-bold uppercase text-slate-400 group-hover:text-slate-900 truncate w-full text-center">{item.name}</span>
-            </div>
-          ))}
+            );
+          })}
           {currentItems.length === 0 && <div className="col-span-3 text-center py-4 text-[8px] text-slate-300 font-bold uppercase italic">Empty</div>}
         </div>
       </div>
@@ -329,7 +347,7 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems, connections);
-                          let strokeColor = conn.color.includes('emerald') ? '#10B981' : (conn.color.includes('rose') ? '#F43F5E' : (conn.color.includes('amber') ? '#FBBF24' : (conn.color.includes('fuchsia') ? '#D946EF' : '#3B82F6')));
+                          let strokeColor = conn.color.includes('emerald') ? '#10B981' : (conn.color.includes('rose') ? '#F43F5E' : (conn.color.includes('amber') ? '#FBBF24' : (conn.color.includes('fuchsia') ? '#D946EF' : (conn.color.includes('slate') ? '#CBD5E1' : '#3B82F6'))));
                           return (
                             <React.Fragment key={conn.id}>
                               <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeLinecap="round" />
@@ -343,7 +361,7 @@ export default function App() {
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems, connections);
-                          let strokeColor = activeTether.color.includes('emerald') ? '#10B981' : (activeTether.color.includes('rose') ? '#F43F5E' : (activeTether.color.includes('amber') ? '#FBBF24' : (activeTether.color.includes('fuchsia') ? '#D946EF' : '#3B82F6')));
+                          let strokeColor = activeTether.color.includes('emerald') ? '#10B981' : (activeTether.color.includes('rose') ? '#F43F5E' : (activeTether.color.includes('amber') ? '#FBBF24' : (activeTether.color.includes('fuchsia') ? '#D946EF' : (activeTether.color.includes('slate') ? '#CBD5E1' : '#3B82F6'))));
                           return <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeDasharray={`${6/zoom},${4/zoom}`} className="opacity-50" />;
                       })()}
                   </svg>
@@ -388,22 +406,6 @@ export default function App() {
       
       <CompactFolderView data={toolboxData} side="left" isOpen={activeFolderView === 'toolbox'} onClose={() => { setActiveFolderView(null); setEditingItem(null); }} path={folderPath} setPath={setFolderPath} />
       <CompactFolderView data={navData} side="right" isOpen={activeFolderView === 'nav'} onClose={() => { setActiveFolderView(null); setFolderPath([]); }} path={folderPath} setPath={setFolderPath} />
-
-      {isStudioOpen && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-slate-100 space-y-6">
-            <h2 className="text-3xl font-black italic uppercase text-slate-800 text-center">Action Init</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <input value={studioName} onChange={e => setStudioName(e.target.value)} placeholder="Identity..." className="w-full bg-slate-50 p-4 rounded-xl font-bold border outline-none" />
-              <textarea value={studioPayload} onChange={e => setStudioPayload(e.target.value)} className="w-full h-28 bg-slate-900 text-emerald-400 p-4 rounded-xl font-mono text-[10px] resize-none border border-white/10 outline-none" placeholder="Payload Schema" />
-            </div>
-            <div className="flex gap-4">
-              <button onClick={() => setIsStudioOpen(false)} className="flex-1 py-5 bg-slate-100 text-slate-400 font-black uppercase text-xs rounded-3xl">Cancel</button>
-              <button onClick={() => { if (!editingItem) return; setCanvasItems(prev => prev.map(i => i.instanceId === editingItem.instanceId ? { ...i, name: studioName, icon: studioIcon, payload: studioPayload, isRegistered: true } : i)); setIsStudioOpen(false); setEditingItem(null); }} className="flex-1 py-5 bg-slate-900 text-white font-black uppercase text-xs rounded-3xl">Initialize</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
