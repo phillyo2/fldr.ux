@@ -4,14 +4,15 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Island Gathering Engine v6.0 [Lane Isolation & Fragmentation]
+ * Island Gathering Engine v7.0 [Vertical Lane Isolation]
  * Pure logic for Crossword (Adjacent) and Tether (Spaced) layout organization.
  * 
  * Rules:
- * 1. Data (Fuchsia) and Recursive (Blue) connections create new independent islands.
- * 2. Yellow (Left) branches create a strict lane boundary to the left of the parent.
- * 3. Red (Right) branches create a strict lane boundary to the right of the parent.
- * 4. Subtrees can never cross the vertical boundary established by their birth tether.
+ * 1. Data (Fuchsia) and Recursive (Blue) isolation ONLY occurs in Grid mode.
+ * 2. In Tether mode, all connections are part of the main tree but respect lane boundaries.
+ * 3. Yellow (Left) branches create a strict lane boundary to the left of the parent.
+ * 4. Red (Right) branches create a strict lane boundary to the right of the parent.
+ * 5. Subtrees can never cross the vertical boundary established by their birth tether.
  */
 
 export interface LayoutResult {
@@ -69,19 +70,20 @@ export function calculateIslandLayout(
     return { tx, ty };
   };
 
-  // Identify Execution Flow Connections (Green, Red, Yellow)
-  // Exclude Data (Fuchsia) and Recursive (Blue) as they trigger new islands
-  const flowConnections = connections.filter(c => 
-    !c.color.includes('fuchsia') && !c.color.includes('blue')
-  );
+  // Rule 1: Fragmentation is mode-dependent
+  const flowConnections = mode === 'grid' 
+    ? connections.filter(c => !c.color.includes('fuchsia') && !c.color.includes('blue'))
+    : connections;
 
-  // Identify all roots (origins, triggers, or targets of data/recursive connections)
+  // Identify all roots (origins, triggers, or targets of fragmentation in grid mode)
   const triggers = new Set(newItems.filter(i => i.isTrigger || i.isOrigin).map(i => i.instanceId));
-  const dataRecursiveTargets = new Set(connections.filter(c => c.color.includes('fuchsia') || c.color.includes('blue')).map(c => c.targetId));
+  const fragmentationTargets = mode === 'grid' 
+    ? new Set(connections.filter(c => c.color.includes('fuchsia') || c.color.includes('blue')).map(c => c.targetId))
+    : new Set();
   
   const incomingFlowTargets = new Set(flowConnections.map(c => c.targetId));
   const rootIds = newItems
-    .filter(i => triggers.has(i.instanceId) || dataRecursiveTargets.has(i.instanceId) || !incomingFlowTargets.has(i.instanceId))
+    .filter(i => triggers.has(i.instanceId) || fragmentationTargets.has(i.instanceId) || !incomingFlowTargets.has(i.instanceId))
     .map(i => i.instanceId);
 
   // 1. Standalone Pack (Top-Left)
@@ -151,12 +153,12 @@ export function calculateIslandLayout(
           tx += stepSize;
           pushDir = 'right';
           // Start a rightward lane: must stay right of parent
-          childMinX = cx + stepSize;
+          childMinX = Math.max(minX, cx + stepSize);
         } else if (conn.sourceSide === 'left') {
           tx -= stepSize;
           pushDir = 'left';
           // Start a leftward lane: must stay left of parent
-          childMaxX = cx - stepSize;
+          childMaxX = Math.min(maxX, cx - stepSize);
         }
 
         const { tx: finalX, ty: finalY } = findSafePosition(
