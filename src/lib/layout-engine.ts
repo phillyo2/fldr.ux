@@ -4,11 +4,11 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Universal Unified Flow Engine v18.0 [Sidecar Boundary & Centrifugal Lane Integrity]
+ * Centrifugal Flow Engine v19.0 [Centrifugal Lane Expansion & Gravity Integrity]
  * 
- * - Sidecars (Fuchsia) now actively push subtree boundaries to the right.
- * - Red Subtree Lane Integrity handles horizontal corridor isolation.
- * - Emerald Subflows maintain vertical spine clearance.
+ * - Implements Centrifugal Pressure: Left subtrees push Left, Right subtrees push Right.
+ * - Spine Integrity: Middle (Center) yellow branches push Left.
+ * - Subtree Isolation: Prevents line-tile intersection by expanding lane breadth outwards.
  */
 
 export interface LayoutResult {
@@ -30,7 +30,11 @@ export function calculateIslandLayout(
 
   const isGrid = mode === 'grid';
   const stepSize = isGrid ? GRID_SIZE : GRID_SIZE * 2;
-  const islandGap = GRID_SIZE * (isGrid ? 4 : 8);
+  const islandGap = GRID_SIZE * (isGrid ? 4 : 12); // Larger gap for centrifugal room
+
+  // Track the origin for gravity calculations
+  const originNode = newItems.find(i => i.isOrigin || i.isTrigger);
+  const originX = originNode ? snapToGrid(originNode.x, 0) : snapToGrid(windowSize.w / 2 - 16, 0);
 
   // Tracking for "Down and Out" Waterfall enforcement
   const corridorFloorY = new Map<number, number>(); 
@@ -56,7 +60,7 @@ export function calculateIslandLayout(
     minX: number = -Infinity,
     maxX: number = Infinity,
     minY: number = -Infinity,
-    hasSidecar: boolean = false
+    gravity: 'LEFT' | 'RIGHT' = 'RIGHT'
   ) => {
     let tx = startX, ty = Math.max(startY, minY);
     
@@ -73,16 +77,15 @@ export function calculateIslandLayout(
     if (tx > maxX) tx = maxX;
 
     let safety = 0;
-    const isOccupied = (x: number, y: number) => {
-      if (occupied.has(getPosKey(x, y))) return true;
-      if (hasSidecar && occupied.has(getPosKey(x - stepSize / 2, y - stepSize / 2))) return true;
-      return false;
-    };
+    const isOccupied = (x: number, y: number) => occupied.has(getPosKey(x, y));
 
     while (isOccupied(tx, ty) && safety < 1000) {
+      // Use gravity to resolve collisions
       if (direction === 'bottom') {
-        ty += stepSize;
-      } else if (direction === 'left') {
+        // When pushing down, also nudge outward based on gravity
+        tx += (gravity === 'RIGHT' ? stepSize : -stepSize);
+        if (isOccupied(tx, ty)) ty += stepSize;
+      } else if (direction === 'left' || gravity === 'LEFT') {
         tx -= stepSize;
       } else {
         tx += stepSize;
@@ -93,8 +96,6 @@ export function calculateIslandLayout(
       if (tx > maxX) tx = maxX;
       if (ty < minY) ty = minY;
       
-      // Secondary safety check for vertical overlap
-      if (isOccupied(tx, ty)) ty += stepSize;
       safety++;
     }
     return { tx, ty };
@@ -123,16 +124,19 @@ export function calculateIslandLayout(
     const node = newItems.find(i => i.instanceId === nodeId);
     if (!node) return;
 
-    // Tether Mode Sidecar Integration (Fuchsia)
-    const hasCurrentSidecar = !isGrid && connections.some(c => c.targetId === nodeId && c.color.includes('fuchsia'));
+    // Centrifugal Gravity Determination
+    const nodeGravity: 'LEFT' | 'RIGHT' = cx < originX ? 'LEFT' : (cx > originX ? 'RIGHT' : 'LEFT');
+
+    // Tether Mode Sidecar Integration (Fuchsia) - Diagonally Up-Left ALWAYS
     if (!isGrid) {
       const dataProviders = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
       dataProviders.forEach(conn => {
         const provider = newItems.find(i => i.instanceId === conn.sourceId);
         if (provider && !visited.has(provider.instanceId)) {
           visited.add(provider.instanceId);
-          provider.x = cx - (stepSize / 2);
-          provider.y = cy - (stepSize / 2);
+          // Strictly 1-cell Diagonally Up-Left
+          provider.x = cx - GRID_SIZE;
+          provider.y = cy - GRID_SIZE;
           occupied.add(getPosKey(provider.x, provider.y));
           islandState.maxX = Math.max(islandState.maxX, provider.x);
         }
@@ -160,10 +164,8 @@ export function calculateIslandLayout(
       let tx = cx, ty = cy;
       let pushDir: 'left' | 'right' | 'bottom' = 'bottom';
       
-      // Sidecar Boundary Persistence: If parent has a sidecar, push children further to the right
-      // to avoid subtree logic wrapping back under the data provider.
-      const boundaryPush = hasCurrentSidecar ? (stepSize / 2) : 0;
-      let childMinX = minX + boundaryPush;
+      // Calculate Lane Boundaries with Centrifugal Force
+      let childMinX = minX;
       let childMaxX = maxX;
       let childMinY = !isGrid ? cy + stepSize : -Infinity;
 
@@ -173,21 +175,18 @@ export function calculateIslandLayout(
       } else if (conn.sourceSide === 'right') {
         tx += stepSize;
         pushDir = 'right';
-        // Red Subtree Lane Integrity: Lock to right lane to clear room for left subflows
-        if (!isGrid) {
+        // Subtree Lane Integrity: In right territory, red moves push boundaries right
+        if (!isGrid && nodeGravity === 'RIGHT') {
           childMinX = Math.max(childMinX, cx + stepSize);
         }
       } else if (conn.sourceSide === 'left') {
         tx -= stepSize;
         pushDir = 'left';
-        if (!isGrid) childMaxX = Math.min(maxX, cx - stepSize);
-      } else if (conn.sourceSide === 'top') {
-        ty -= stepSize;
-        pushDir = 'bottom';
+        // Subtree Lane Integrity: In center or left territory, yellow moves push boundaries left
+        if (!isGrid && nodeGravity === 'LEFT') {
+          childMaxX = Math.min(maxX, cx - stepSize);
+        }
       }
-
-      // Proactive Sidecar detection for the target node
-      const hasTargetSidecar = !isGrid && connections.some(c => c.targetId === conn.targetId && c.color.includes('fuchsia'));
 
       const { tx: finalX, ty: finalY } = findSafePosition(
         snapToGrid(tx, 0), 
@@ -196,7 +195,7 @@ export function calculateIslandLayout(
         childMinX,
         childMaxX,
         childMinY,
-        hasTargetSidecar
+        nodeGravity
       );
 
       processNode(conn.targetId, finalX, finalY, childMinX, childMaxX, childMinY, islandState);
@@ -224,7 +223,9 @@ export function calculateIslandLayout(
     const { tx, ty } = findSafePosition(
       snapToGrid(sx + (idx % 8) * standStep, 0),
       snapToGrid(sy + Math.floor(idx / 8) * standStep, HEADER_OFFSET),
-      'right'
+      'right',
+      -Infinity, Infinity, -Infinity,
+      'RIGHT'
     );
     item.x = tx;
     item.y = ty;
