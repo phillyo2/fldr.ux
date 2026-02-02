@@ -137,7 +137,6 @@ export default function App() {
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
 
-    // Entry points trigger a full workflow gather
     if (item.isTrigger) {
       const newItem = { 
         ...item, 
@@ -153,7 +152,6 @@ export default function App() {
       return;
     }
 
-    // Standard logic tiles spawn near existing tree anchors
     let spawnX = screenCenterX;
     let spawnY = screenCenterY;
     const candidates: {x: number, y: number, dist: number, side: string}[] = [];
@@ -178,7 +176,6 @@ export default function App() {
       spawnY = best.y + HEADER_OFFSET - 16;
     }
 
-    // Occupancy check for spawning
     let safety = 0;
     const occupied = new Set(canvasItems.map(i => `${snapToGrid(i.x, 0)},${snapToGrid(i.y, HEADER_OFFSET)}`));
     while (occupied.has(`${snapToGrid(spawnX, 0)},${snapToGrid(spawnY, HEADER_OFFSET)}`) && safety < 100) {
@@ -264,7 +261,6 @@ export default function App() {
       
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
       
-      // If manual drop results in overlap, trigger a gather to smartly adjust the entire flow
       if (collision) {
         gatherLayout(updatedItems);
       }
@@ -357,12 +353,11 @@ export default function App() {
         </div>
       </main>
       
-      {/* Layout Controls */}
       <div className="fixed top-[28px] right-[28px] z-[1000] flex flex-col gap-2">
-        <div onClick={() => { setLayoutMode('grid'); gatherLayout(undefined, 'grid'); }} className={`w-[32px] h-[32px] flex items-center justify-center cursor-pointer border rounded-md shadow-sm transition-all ${layoutMode === 'grid' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`} title="Crossword Gather (Adjacent)">
+        <div onClick={() => { setLayoutMode('grid'); gatherLayout(undefined, 'grid'); }} className={`w-[32px] h-[32px] flex items-center justify-center cursor-pointer border rounded-md shadow-sm transition-all ${layoutMode === 'grid' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`} title="Crossword Gather">
           <LayoutGrid size={20} />
         </div>
-        <div onClick={() => { setLayoutMode('tether'); gatherLayout(undefined, 'tether'); }} className={`w-[32px] h-[32px] flex items-center justify-center cursor-pointer border rounded-md shadow-sm transition-all ${layoutMode === 'tether' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`} title="Tether Gather (Spaced)">
+        <div onClick={() => { setLayoutMode('tether'); gatherLayout(undefined, 'tether'); }} className={`w-[32px] h-[32px] flex items-center justify-center cursor-pointer border rounded-md shadow-sm transition-all ${layoutMode === 'tether' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`} title="Tether Gather">
           <Waypoints size={20} />
         </div>
       </div>
