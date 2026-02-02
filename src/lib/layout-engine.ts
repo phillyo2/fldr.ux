@@ -4,9 +4,10 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Island Gathering Engine v4.0 [Boundary Protected]
+ * Island Gathering Engine v5.0 [Corridor Isolation]
  * Pure logic for Crossword (Adjacent) and Tether (Spaced) layout organization.
- * Strictly enforces Zero-Overlap and protects tree boundaries via recursive horizontal pushing.
+ * Strictly enforces Vertical Lane Isolation: Each workflow island occupies an 
+ * exclusive horizontal "corridor" that no other tree can cross over or under.
  */
 
 export interface LayoutResult {
@@ -29,23 +30,23 @@ export function calculateIslandLayout(
   // Grid mode allows adjacency (1 grid unit)
   // Tether mode forbids adjacency (min 2 grid units)
   const stepSize = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
+  const islandGap = GRID_SIZE * (mode === 'grid' ? 4 : 6);
 
   /**
    * Smart Occupancy Adjustment
-   * If a cell is taken, search in the intended direction of flow.
-   * Special Rule: If a branch encroaches on another tree's space, push it horizontally.
+   * Finds the next available cell in the intended direction.
    */
   const findSafePosition = (startX: number, startY: number, direction: 'left' | 'right' | 'bottom') => {
     let tx = startX, ty = startY;
     let safety = 0;
     while (occupied.has(getPosKey(tx, ty)) && safety < 1000) {
       if (direction === 'bottom') {
-        // If bottom is blocked by another tree, prioritize pushing RIGHT to clear the boundary
         ty += stepSize;
-        if (safety > 5) tx += stepSize; 
+      } else if (direction === 'left') {
+        tx -= stepSize;
+      } else {
+        tx += stepSize;
       }
-      else if (direction === 'left') tx -= stepSize;
-      else if (direction === 'right') tx += stepSize;
       safety++;
     }
     return { tx, ty };
@@ -61,7 +62,7 @@ export function calculateIslandLayout(
   const incomingTargetIds = new Set(connections.map(c => c.targetId));
   const roots = inFlow.filter(i => !incomingTargetIds.has(i.instanceId));
 
-  // 1. Standalone Grid (Top-Left Island)
+  // 1. Standalone Grid Island (Top-Left Reserved Section)
   let sx = 64, sy = 120;
   standalone.forEach((item, idx) => {
     const standStep = GRID_SIZE * (mode === 'grid' ? 1 : 2);
@@ -76,10 +77,12 @@ export function calculateIslandLayout(
     visited.add(item.instanceId);
   });
 
-  // 2. Workflow Islands (Horizontal Side-by-Side)
-  let currentFlowX = snapToGrid(windowSize.w / 2 - 16, 0);
+  // 2. Vertical Corridor Islands (Strictly side-by-side)
+  // We determine a baseline X and then push the "Lane Boundary" after each tree
+  let currentLaneStartX = snapToGrid(windowSize.w / 2 - 16, 0);
   const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
   
+  // Sort roots to maintain consistent horizontal order
   const sortedRoots = [...roots].sort((a, b) => {
     if (a.isOrigin) return -1;
     if (b.isOrigin) return 1;
@@ -87,8 +90,9 @@ export function calculateIslandLayout(
   });
 
   sortedRoots.forEach((root) => {
-    let islandMaxX = currentFlowX;
+    let islandMaxX = currentLaneStartX;
     
+    // Recursive traversal to lay out the tree within its corridor
     const processNode = (nodeId: string, cx: number, cy: number) => {
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
@@ -101,6 +105,7 @@ export function calculateIslandLayout(
         islandMaxX = Math.max(islandMaxX, cx);
       }
 
+      // Get outgoing connections and sort them by side to determine flow priority
       const outgoing = connections.filter(c => c.sourceId === nodeId);
       const sortedOutgoing = [...outgoing].sort((a, b) => {
         const order = { bottom: 0, right: 1, left: 2, top: 3 };
@@ -132,14 +137,15 @@ export function calculateIslandLayout(
       });
     };
 
-    // Ensure the start of this island doesn't conflict with existing occupancy
-    const { tx: rootX, ty: rootY } = findSafePosition(currentFlowX, startY, 'right');
-    processNode(root.instanceId, rootX, rootY);
+    // Initialize root in the next available lane
+    processNode(root.instanceId, currentLaneStartX, startY);
     
-    // Push next island boundary
-    currentFlowX = snapToGrid(islandMaxX + GRID_SIZE * (mode === 'grid' ? 4 : 6), 0);
+    // Strict Lane Boundary Protection: 
+    // The next island MUST start after the widest point of the current island + buffer.
+    currentLaneStartX = snapToGrid(islandMaxX + islandGap, 0);
   });
 
+  // Calculate camera orientation targeting the primary origin
   const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
   let targetVX = windowSize.w / 2 - (origin ? (origin.x + 16) : 0) * zoom;
   let targetVY = windowSize.h / 2 - (origin ? (origin.y - HEADER_OFFSET + 16) : 0) * zoom;
