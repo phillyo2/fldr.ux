@@ -4,15 +4,16 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Island Gathering Engine v8.0 [Horizontal & Vertical Isolation]
+ * Island Gathering Engine v9.0 [Corridor & Slice Isolation]
  * Pure logic for Crossword (Adjacent) and Tether (Spaced) layout organization.
  * 
  * Rules:
- * 1. Data (Fuchsia) and Recursive (Blue) isolation occurs in Grid mode for fragmentation.
- * 2. In Tether mode, all connections are part of a unified flow but respect directional gates.
- * 3. Yellow (Left) establishes a vertical slice: descendants stay LEFT of parent X.
- * 4. Red (Right) establishes a vertical slice: descendants stay RIGHT of parent X.
- * 5. Horizontal Slice: Every descendant establishes a Y-boundary; children stay BELOW parent Y.
+ * 1. Data (Fuchsia) and Recursive (Blue) isolation occurs only in Grid mode for fragmentation.
+ * 2. In Tether mode, all connections are part of a unified flow but respect directional corridors.
+ * 3. Vertical Corridor Isolation: Yellow (Left) stays left of parent X. Red (Right) stays right of parent X.
+ * 4. Horizontal Slice Isolation: Every descendant establishes a Y-boundary; children stay BELOW parent Y.
+ * 5. Outward Enforcement: Subtrees calculate their footprint and push siblings further outward (Left/Right) 
+ *    to prevent logical crossovers.
  */
 
 export interface LayoutResult {
@@ -33,7 +34,7 @@ export function calculateIslandLayout(
   const getPosKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
 
   const stepSize = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
-  const islandGap = GRID_SIZE * (mode === 'grid' ? 4 : 6);
+  const islandGap = GRID_SIZE * (mode === 'grid' ? 4 : 8);
 
   /**
    * Directional Occupancy & Boundary Adjustment
@@ -49,6 +50,11 @@ export function calculateIslandLayout(
   ) => {
     let tx = startX, ty = Math.max(startY, minY);
     let safety = 0;
+    
+    // Ensure starting point respects boundaries
+    if (tx < minX) tx = minX;
+    if (tx > maxX) tx = maxX;
+
     while (occupied.has(getPosKey(tx, ty)) && safety < 1000) {
       if (direction === 'bottom') {
         ty += stepSize;
@@ -74,13 +80,14 @@ export function calculateIslandLayout(
     return { tx, ty };
   };
 
-  // Rule 1: Fragmentation logic for Grid View isolation
-  const flowConnections = mode === 'grid' 
+  // Fragmentation logic for Grid View isolation (only in Grid mode)
+  const isGrid = mode === 'grid';
+  const flowConnections = isGrid 
     ? connections.filter(c => !c.color.includes('fuchsia') && !c.color.includes('blue'))
     : connections;
 
   const triggers = new Set(newItems.filter(i => i.isTrigger || i.isOrigin).map(i => i.instanceId));
-  const fragmentationTargets = mode === 'grid' 
+  const fragmentationTargets = isGrid 
     ? new Set(connections.filter(c => c.color.includes('fuchsia') || c.color.includes('blue')).map(c => c.targetId))
     : new Set();
   
@@ -98,7 +105,7 @@ export function calculateIslandLayout(
 
   let sx = 64, sy = 120;
   standalone.forEach((item, idx) => {
-    const standStep = GRID_SIZE * (mode === 'grid' ? 1 : 2);
+    const standStep = GRID_SIZE * (isGrid ? 1 : 2);
     const { tx, ty } = findSafePosition(
       snapToGrid(sx + (idx % 8) * standStep, 0),
       snapToGrid(sy + Math.floor(idx / 8) * standStep, HEADER_OFFSET),
@@ -111,7 +118,7 @@ export function calculateIslandLayout(
   });
 
   // 2. Sequential Lane-Isolated Island Layout
-  let currentLaneStartX = snapToGrid(windowSize.w / 2 - 16, 0);
+  let currentIslandX = snapToGrid(windowSize.w / 2 - 16, 0);
   const startY = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
   const sortedRoots = rootIds.map(id => newItems.find(i => i.instanceId === id)!).sort((a, b) => {
@@ -123,7 +130,8 @@ export function calculateIslandLayout(
   sortedRoots.forEach((root) => {
     if (!root || visited.has(root.instanceId)) return;
     
-    let islandMaxX = currentLaneStartX;
+    let islandMaxX = currentIslandX;
+    let islandMinX = currentIslandX;
 
     const processNode = (nodeId: string, cx: number, cy: number, minX: number, maxX: number, minY: number) => {
       if (visited.has(nodeId)) return;
@@ -135,10 +143,18 @@ export function calculateIslandLayout(
         node.y = cy; 
         occupied.add(getPosKey(cx, cy));
         islandMaxX = Math.max(islandMaxX, cx);
+        islandMinX = Math.min(islandMinX, cx);
       }
 
       const outgoing = flowConnections.filter(c => c.sourceId === nodeId);
-      outgoing.forEach(conn => {
+      
+      // Sort outgoing to process bottom/center first, then outwards
+      const sortedOutgoing = outgoing.sort((a, b) => {
+        const order = { 'bottom': 0, 'right': 1, 'left': 2 };
+        return (order[a.sourceSide as keyof typeof order] || 3) - (order[b.sourceSide as keyof typeof order] || 3);
+      });
+
+      sortedOutgoing.forEach(conn => {
         if (visited.has(conn.targetId)) return;
         
         let tx = cx, ty = cy;
@@ -147,21 +163,25 @@ export function calculateIslandLayout(
         let childMaxX = maxX;
         
         // The "Horizontal Slice" - children can never go above parent in tether mode
-        let childMinY = mode === 'tether' ? cy + stepSize : -Infinity;
+        let childMinY = !isGrid ? cy + stepSize : -Infinity;
 
         if (conn.sourceSide === 'bottom') {
           ty += stepSize;
           pushDir = 'bottom';
+          // Stay centered relative to parent horizontal corridors
+          // But allow shifting if occupied
         } else if (conn.sourceSide === 'right') {
           tx += stepSize;
           pushDir = 'right';
-          // Start a rightward lane: descendants must stay right of this vertical slice
-          childMinX = Math.max(minX, cx + (mode === 'grid' ? stepSize : stepSize / 2));
+          // Outward Enforcement: Start a rightward lane. Descendants stay RIGHT of this vertical slice.
+          // Also stays RIGHT of parent X to maintain vertical corridor isolation.
+          childMinX = Math.max(minX, cx + stepSize);
         } else if (conn.sourceSide === 'left') {
           tx -= stepSize;
           pushDir = 'left';
-          // Start a leftward lane: descendants must stay left of this vertical slice
-          childMaxX = Math.min(maxX, cx - (mode === 'grid' ? stepSize : stepSize / 2));
+          // Outward Enforcement: Start a leftward lane. Descendants stay LEFT of this vertical slice.
+          // Also stays LEFT of parent X to maintain vertical corridor isolation.
+          childMaxX = Math.min(maxX, cx - stepSize);
         }
 
         const { tx: finalX, ty: finalY } = findSafePosition(
@@ -172,15 +192,16 @@ export function calculateIslandLayout(
           childMaxX,
           childMinY
         );
+
         processNode(conn.targetId, finalX, finalY, childMinX, childMaxX, childMinY);
       });
     };
 
     // Initialize root in its exclusive corridor
-    processNode(root.instanceId, currentLaneStartX, startY, -Infinity, Infinity, -Infinity);
+    processNode(root.instanceId, currentIslandX, startY, -Infinity, Infinity, -Infinity);
     
     // Push the next island beyond the bounds of this logical tree
-    currentLaneStartX = snapToGrid(islandMaxX + islandGap, 0);
+    currentIslandX = snapToGrid(islandMaxX + islandGap, 0);
   });
 
   // Center camera on primary origin
