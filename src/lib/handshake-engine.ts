@@ -3,10 +3,11 @@ import { LATCH_POINTS, DETECTION_RANGE } from './constants';
 import { isAncestor } from './pathing';
 
 /**
- * Handshake Engine v1.5
- * Pure logic for node connections, tether colors, and port states.
- * Trigger Protocol: Triggers only connect to Origins via Orange lines.
- * Ambiguous Protocol: Placeholders on Entry Point inputs render as Gray.
+ * Handshake Engine v1.6 [Vibrant Trigger Protocol]
+ * 
+ * - Vibrant Orange (orange-500) for Trigger lines.
+ * - Amber Yellow (orange-400) for Data Provider lines.
+ * - Gray (slate-300) for Ambiguous Placeholder docking on Entry Points.
  */
 
 export const getTreeContext = (nodeId: string, currentConnections: Connection[]): string | null => {
@@ -56,6 +57,10 @@ export const calculateGhostHandshakes = (
     if (other.instanceId === dId) return;
     
     LATCH_POINTS.forEach(lSource => {
+      // Trigger Isolation: Only Emerald (Bottom) allowed
+      if (dragNode.isTrigger && lSource.id !== 'bottom') return;
+      if (dragNode.isDataProvider && lSource.id !== 'bottom') return;
+
       const isOutputAnchor = lSource.id === 'bottom' || lSource.id === 'right';
       
       if (isOutputAnchor && connections.some(c => c.sourceId === dId && c.sourceSide === lSource.id)) {
@@ -74,14 +79,17 @@ export const calculateGhostHandshakes = (
           if (other.isOrigin && lSource.id === 'bottom' && lTarget.id === 'top') {
             if (dragNode.isTrigger) {
               valid = true;
-              color = 'amber-500'; // Orange connection for Trigger
+              color = 'orange-500'; // Vibrant Orange for Trigger
+            } else if (dragNode.isDataProvider) {
+              valid = true;
+              color = 'orange-400'; // Amber Orange for Data
             } else if (!dragNode.isRegistered) {
               valid = true;
-              color = 'slate-300'; // Gray connection for Placeholder
+              color = 'slate-300'; // Gray for Ambiguous Placeholder
             }
           } 
           // STANDARD FLOW
-          else if (!dragNode.isTrigger && !other.isTrigger) {
+          else if (!dragNode.isTrigger && !dragNode.isDataProvider && !other.isTrigger && !other.isDataProvider) {
              const otherCtx = getTreeContext(other.instanceId, connections);
              if (!dragCtx && otherCtx && lTarget.id === 'top' && lSource.id === 'bottom') {
                const dragHasAnyConnection = connections.some(c => c.sourceId === dId || c.targetId === dId);
@@ -115,13 +123,16 @@ export const calculateGhostHandshakes = (
           if (dragNode.isOrigin && lSource.id === 'bottom' && lTarget.id === 'top') {
             if (other.isTrigger) {
               valid = true;
-              color = 'amber-500';
+              color = 'orange-500';
+            } else if (other.isDataProvider) {
+              valid = true;
+              color = 'orange-400';
             } else if (!other.isRegistered) {
               valid = true;
               color = 'slate-300';
             }
           }
-          else if (!other.isTrigger && !dragNode.isTrigger) {
+          else if (!other.isTrigger && !other.isDataProvider && !dragNode.isTrigger && !dragNode.isDataProvider) {
             const otherCtx = getTreeContext(other.instanceId, connections);
             if (otherCtx && !dragCtx && lSource.id !== 'top') {
               const dragHasAnyConnection = connections.some(c => c.sourceId === dId || c.targetId === dId);
@@ -147,7 +158,7 @@ export const getPortState = (
   connections: Connection[], 
   activeTether: Connection | null
 ) => {
-  if (item.isTrigger && lp.id !== 'bottom') {
+  if ((item.isTrigger || item.isDataProvider) && lp.id !== 'bottom') {
     return { dotColor: 'bg-transparent', isActive: false };
   }
 
@@ -164,12 +175,15 @@ export const getPortState = (
   if (connectedAsSource || connectedAsTarget || tethered) {
     isActive = true;
     if (lp.id === 'bottom') {
-      const isOrange = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('amber'));
-      const activeIsOrange = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('amber');
-      const isGray = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('slate'));
-      const activeIsGray = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('slate');
+      const isVibrantOrange = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('orange-500'));
+      const activeIsVibrantOrange = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('orange-500');
+      const isAmberOrange = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('orange-400'));
+      const activeIsAmberOrange = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('orange-400');
+      const isGray = connections.some(c => c.sourceId === item.instanceId && c.sourceSide === 'bottom' && c.color.includes('slate-300'));
+      const activeIsGray = activeTether && activeTether.sourceId === item.instanceId && activeTether.sourceSide === 'bottom' && activeTether.color.includes('slate-300');
       
-      if (isOrange || activeIsOrange) dotColor = 'bg-amber-500';
+      if (isVibrantOrange || activeIsVibrantOrange) dotColor = 'bg-orange-500';
+      else if (isAmberOrange || activeIsAmberOrange) dotColor = 'bg-orange-400';
       else if (isGray || activeIsGray) dotColor = 'bg-slate-300';
       else dotColor = 'bg-emerald-500';
     }
@@ -178,12 +192,15 @@ export const getPortState = (
     else {
       const isFuchsia = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('fuchsia'));
       const activeIsFuchsia = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('fuchsia');
-      const isOrangeInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('amber'));
-      const activeIsOrangeInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('amber');
-      const isGrayInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('slate'));
-      const activeIsGrayInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('slate');
+      const isVibrantInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('orange-500'));
+      const activeIsVibrantInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('orange-500');
+      const isAmberInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('orange-400'));
+      const activeIsAmberInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('orange-400');
+      const isGrayInput = connections.some(c => c.targetId === item.instanceId && c.targetSide === 'top' && c.color.includes('slate-300'));
+      const activeIsGrayInput = activeTether && activeTether.targetId === item.instanceId && activeTether.targetSide === 'top' && activeTether.color.includes('slate-300');
       
-      if (isOrangeInput || activeIsOrangeInput) dotColor = 'bg-amber-500';
+      if (isVibrantInput || activeIsVibrantInput) dotColor = 'bg-orange-500';
+      else if (isAmberInput || activeIsAmberInput) dotColor = 'bg-orange-400';
       else if (isGrayInput || activeIsGrayInput) dotColor = 'bg-slate-300';
       else if (isFuchsia || activeIsFuchsia) dotColor = 'bg-fuchsia-500';
       else dotColor = 'bg-blue-500';

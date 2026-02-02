@@ -18,6 +18,7 @@ export interface FolderItem {
   isFolder?: boolean;
   isBuilder?: boolean;
   isTrigger?: boolean;
+  isDataProvider?: boolean;
   items?: FolderItem[];
   color?: string;
 }
@@ -32,6 +33,7 @@ export interface CanvasItem {
   isOrigin?: boolean;
   isBuilder?: boolean;
   isTrigger?: boolean;
+  isDataProvider?: boolean;
   setup?: string;
   payload?: string;
   logic?: string;
@@ -50,6 +52,7 @@ export interface Connection {
   snapX?: number;
   snapY?: number;
   waypoint?: { x: number; y: number };
+  dotDistance?: number;
 }
 
 export interface FolderData {
