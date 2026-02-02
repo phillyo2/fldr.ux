@@ -4,7 +4,7 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Universal Unified Flow Engine v15.0 [Strict Lane Integrity & Waterfall Sidecar Alignment]
+ * Universal Unified Flow Engine v17.0 [Red Subtree Lane Integrity & Centrifugal Isolation]
  */
 
 export interface LayoutResult {
@@ -58,6 +58,8 @@ export function calculateIslandLayout(
     
     const corridorX = snapToGrid(tx, 0);
     const floorY = corridorFloorY.get(corridorX) || 0;
+    
+    // In Tether mode, enforce waterfall clearance
     if (!isGrid && ty < floorY + stepSize) {
       ty = floorY + stepSize;
     }
@@ -87,17 +89,17 @@ export function calculateIslandLayout(
       if (tx > maxX) tx = maxX;
       if (ty < minY) ty = minY;
       
-      // Check for overlap after push
+      // Secondary safety check for vertical overlap
       if (isOccupied(tx, ty)) ty += stepSize;
       safety++;
     }
     return { tx, ty };
   };
 
-  // 1. Connection Filtering: Grid mode fragments, Tether mode integrates all
+  // Connection Filtering
   const flowConnections = isGrid 
     ? connections.filter(c => !c.color.includes('fuchsia') && !c.color.includes('blue'))
-    : connections.filter(c => !c.color.includes('blue')); // Blue is just an indicator in Tether
+    : connections.filter(c => !c.color.includes('blue'));
 
   const triggers = new Set(newItems.filter(i => i.isTrigger || i.isOrigin).map(i => i.instanceId));
   const rootIds = newItems
@@ -117,14 +119,13 @@ export function calculateIslandLayout(
     const node = newItems.find(i => i.instanceId === nodeId);
     if (!node) return;
 
-    // Place Fuchsia Providers "Up and To The Left" of their connected node in Tether Mode
+    // Tether Mode Sidecar Integration (Fuchsia)
     if (!isGrid) {
       const dataProviders = connections.filter(c => c.targetId === nodeId && c.color.includes('fuchsia'));
       dataProviders.forEach(conn => {
         const provider = newItems.find(i => i.instanceId === conn.sourceId);
         if (provider && !visited.has(provider.instanceId)) {
           visited.add(provider.instanceId);
-          // Position strictly up and to the left
           provider.x = cx - (stepSize / 2);
           provider.y = cy - (stepSize / 2);
           occupied.add(getPosKey(provider.x, provider.y));
@@ -142,6 +143,7 @@ export function calculateIslandLayout(
     const isTerminal = outgoing.length === 0;
     updateGlobalSpatialState(cx, cy, isTerminal);
 
+    // Sort to prioritize Emerald (Bottom) then Rose (Right/Red)
     const sortedOutgoing = outgoing.sort((a, b) => {
       const order = { 'bottom': 0, 'right': 1, 'left': 2, 'top': 3 };
       return (order[a.sourceSide as keyof typeof order] || 4) - (order[b.sourceSide as keyof typeof order] || 4);
@@ -161,11 +163,14 @@ export function calculateIslandLayout(
       } else if (conn.sourceSide === 'right') {
         tx += stepSize;
         pushDir = 'right';
-        if (!isGrid) childMinX = Math.max(minX, cx + stepSize); // Lock to right lane
+        // Red Subtree Lane Integrity: Lock to right lane to clear room for left subflows
+        if (!isGrid) {
+          childMinX = Math.max(minX, cx + stepSize);
+        }
       } else if (conn.sourceSide === 'left') {
         tx -= stepSize;
         pushDir = 'left';
-        if (!isGrid) childMaxX = Math.min(maxX, cx - stepSize); // Lock to left lane
+        if (!isGrid) childMaxX = Math.min(maxX, cx - stepSize);
       } else if (conn.sourceSide === 'top') {
         ty -= stepSize;
         pushDir = 'bottom';
@@ -187,7 +192,7 @@ export function calculateIslandLayout(
     });
   };
 
-  // 2. Traversal Loop
+  // Traversal Loop
   let currentIslandX = snapToGrid(windowSize.w / 2 - 16, 0);
   const startYBase = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
@@ -198,7 +203,7 @@ export function calculateIslandLayout(
     currentIslandX = snapToGrid(islandState.maxX + islandGap, 0);
   });
 
-  // 3. Pack Isolated Items
+  // Isolated Pack for Standalone Nodes
   const connectedIds = new Set(visited);
   const standalone = newItems.filter(i => !connectedIds.has(i.instanceId));
 
@@ -214,7 +219,6 @@ export function calculateIslandLayout(
     item.y = ty;
     occupied.add(getPosKey(item.x, item.y));
     visited.add(item.instanceId);
-    updateGlobalSpatialState(item.x, item.y, true);
   });
 
   const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
