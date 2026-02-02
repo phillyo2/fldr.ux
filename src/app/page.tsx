@@ -19,6 +19,7 @@ export default function App() {
   // --- STATE ---
   const [currentPageId, setCurrentPageId] = useState('studio');
   const [activeFolderView, setActiveFolderView] = useState<'nav' | 'toolbox' | null>(null);
+  const [folderPath, setFolderPath] = useState<FolderItem[]>([]);
   const [windowSize, setWindowSize] = useState({ w: 1024, h: 768 });
   const [isReady, setIsReady] = useState(false);
   const [layoutMode, setLayoutMode] = useState<'grid' | 'tether'>('grid');
@@ -42,20 +43,20 @@ export default function App() {
     icon: 'Package',
     color: 'bg-slate-900',
     items: [
-      { name: 'New Action', icon: 'Plus', isBuilder: true },
-      { name: 'Entry Point', icon: 'Shield', isTrigger: true, isBuilder: true },
       { name: 'Actions', icon: 'Zap', isFolder: true, items: [
         { name: 'Logic', icon: 'Code2', isFolder: true, items: [
-            { name: 'Circuit Breaker', icon: 'Shuffle', isBuilder: true }
+            { name: 'Circuit Breaker', icon: 'Shuffle' }
         ] },
         { name: 'Triggers', icon: 'Radio', isFolder: true, items: [
-            { name: 'WebHook', icon: 'Globe', isTrigger: true, isBuilder: true }
-        ] }
+            { name: 'WebHook', icon: 'Globe', isTrigger: true }
+        ] },
+        { name: 'Notify', icon: 'Bell' },
+        { name: 'Log', icon: 'Terminal' }
       ] },
       { name: 'Modifiers', icon: 'Settings', isFolder: true, color: 'bg-amber-500', items: [
-        { name: 'Env Vars', icon: 'Globe', isBuilder: true },
-        { name: 'RBAC', icon: 'Shield', isBuilder: true },
-        { name: 'Config', icon: 'Settings', isBuilder: true }
+        { name: 'Env Vars', icon: 'Globe' },
+        { name: 'RBAC', icon: 'Shield' },
+        { name: 'Config', icon: 'Settings' }
       ]}
     ]
   };
@@ -143,7 +144,7 @@ export default function App() {
         instanceId: newInstanceId, 
         x: screenCenterX, 
         y: screenCenterY + HEADER_OFFSET, 
-        isRegistered: !item.isBuilder 
+        isRegistered: true
       } as CanvasItem;
       const updatedItems = [...canvasItems, newItem];
       setCanvasItems(updatedItems);
@@ -183,7 +184,7 @@ export default function App() {
       safety++;
     }
 
-    const newItem = { ...item, instanceId: newInstanceId, x: snapToGrid(spawnX, 0), y: snapToGrid(spawnY, HEADER_OFFSET), isRegistered: !item.isBuilder } as CanvasItem;
+    const newItem = { ...item, instanceId: newInstanceId, x: snapToGrid(spawnX, 0), y: snapToGrid(spawnY, HEADER_OFFSET), isRegistered: true } as CanvasItem;
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
@@ -270,8 +271,7 @@ export default function App() {
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
   }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, zoom, canvasItems]);
 
-  const CompactFolderView = ({ data, side, isOpen, onClose }: { data: FolderData, side: 'left' | 'right', isOpen: boolean, onClose: () => void }) => {
-    const [path, setPath] = useState<FolderItem[]>([]);
+  const CompactFolderView = ({ data, side, isOpen, onClose, path, setPath }: { data: FolderData, side: 'left' | 'right', isOpen: boolean, onClose: () => void, path: FolderItem[], setPath: React.Dispatch<React.SetStateAction<FolderItem[]>> }) => {
     if (!isOpen) return null;
     const currentItems = path.length > 0 ? path[path.length - 1].items || [] : data.items;
     const currentTitle = path.length > 0 ? path[path.length - 1].name : data.title;
@@ -365,11 +365,16 @@ export default function App() {
       <div onClick={() => setZoom(prev => Math.min(2, prev + 0.1))} className="fixed top-[calc(50vh-32px)] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Plus size={20} className="text-slate-700" /></div>
       <div onClick={() => setZoom(prev => Math.max(0.5, prev - 0.1))} className="fixed top-[50vh] right-[28px] z-[1000] w-[32px] h-[32px] bg-white flex items-center justify-center cursor-pointer border border-slate-200 rounded-md shadow-sm hover:bg-slate-50 transition-all"><Minus size={20} className="text-slate-700" /></div>
       
-      <div onClick={() => setActiveFolderView(v => v === 'toolbox' ? null : 'toolbox')} className="fixed bottom-[28px] left-[28px] z-[700] w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800"><Folder size={20} className="text-white" /></div>
+      <div className="fixed bottom-[28px] left-[28px] z-[700] flex gap-2">
+        <div onClick={() => handleSmartBirth({ name: 'Entry Point', icon: 'Shield', isTrigger: true })} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="New Entry Point"><Shield size={20} className="text-white" /></div>
+        <div onClick={() => { setActiveFolderView('toolbox'); setFolderPath([toolboxData.items[0]]); }} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="New Action"><Plus size={20} className="text-white" /></div>
+        <div onClick={() => { setActiveFolderView(v => v === 'toolbox' ? null : 'toolbox'); setFolderPath([]); }} className="w-[32px] h-[32px] bg-slate-900 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-slate-800" title="Toolbox"><Folder size={20} className="text-white" /></div>
+      </div>
+
       <div onClick={() => setActiveFolderView(v => v === 'nav' ? null : 'nav')} className="fixed bottom-[28px] right-[28px] z-[700] w-[32px] h-[32px] bg-blue-600 rounded-md shadow-md flex items-center justify-center cursor-pointer hover:scale-105 transition-transform border border-blue-700"><Compass size={20} className="text-white" /></div>
       
-      <CompactFolderView data={toolboxData} side="left" isOpen={activeFolderView === 'toolbox'} onClose={() => setActiveFolderView(null)} />
-      <CompactFolderView data={navData} side="right" isOpen={activeFolderView === 'nav'} onClose={() => setActiveFolderView(null)} />
+      <CompactFolderView data={toolboxData} side="left" isOpen={activeFolderView === 'toolbox'} onClose={() => setActiveFolderView(null)} path={folderPath} setPath={setFolderPath} />
+      <CompactFolderView data={navData} side="right" isOpen={activeFolderView === 'nav'} onClose={() => { setActiveFolderView(null); setFolderPath([]); }} path={folderPath} setPath={setFolderPath} />
 
       {isStudioOpen && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
