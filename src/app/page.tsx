@@ -14,6 +14,31 @@ import { getSmartPath, snapToGrid } from '@/lib/pathing';
 import { calculateGhostHandshakes, getPortState, getTreeContext } from '@/lib/handshake-engine';
 import { calculateIslandLayout } from '@/lib/layout-engine';
 
+/**
+ * Signal Resolution Utility v2.0 [Port-Centric Protocol]
+ * Centralizes the industrial color logic to ensure ports dictate flow identity.
+ */
+const resolveSignalColor = (conn: Connection, source: CanvasItem | undefined, target: CanvasItem | undefined): string => {
+  if (!source || !target) return '#CBD5E1'; // Default Fallback (Slate-300)
+
+  // 1. UPSTREAM / ORIGIN SPECIALIZATION
+  if (target.isOrigin) {
+    if (source.isTrigger) return '#F97316'; // Vibrant Orange-500
+    if (source.isDataProvider) return '#D946EF'; // Industrial Fuchsia-500
+    if (!source.isRegistered) return '#CBD5E1'; // Ambiguous Placeholder (Gray)
+    return '#3B82F6'; // Registered Flow Recursive (Blue)
+  }
+
+  // 2. PORT-DRIVEN IDENTITY
+  switch (conn.sourceSide) {
+    case 'bottom': return '#10B981'; // Success / Main Flow (Emerald-500)
+    case 'right': return '#F43F5E';  // Error / Alternate (Rose-500)
+    case 'left': return '#FBBF24';   // Parallel / Peek (Amber-400)
+    case 'top': return '#3B82F6';    // Secondary Input (Blue-500)
+    default: return '#3B82F6';
+  }
+};
+
 export default function App() {
   // --- STATE ---
   const [currentPageId, setCurrentPageId] = useState('studio');
@@ -47,16 +72,10 @@ export default function App() {
           { name: 'Cron Job', icon: 'Clock', isTrigger: true },
           { name: 'Auth Event', icon: 'Shield', isTrigger: true }
       ] },
-      { name: 'Data', icon: 'Database', isFolder: true, items: [
-        { name: 'Providers', icon: 'Network', isFolder: true, items: [
+      { name: 'Data Providers', icon: 'Network', isFolder: true, items: [
           { name: 'PostgreSQL', icon: 'Database', isDataProvider: true },
           { name: 'Redis Cache', icon: 'Zap', isDataProvider: true },
           { name: 'S3 Storage', icon: 'HardDrive', isDataProvider: true }
-        ]},
-        { name: 'Transformers', icon: 'Shuffle', items: [
-          { name: 'JSON Map', icon: 'Code2' },
-          { name: 'B64 Encode', icon: 'Terminal' }
-        ]}
       ]},
       { name: 'Actions', icon: 'Zap', isFolder: true, items: [
         { name: 'Logic', icon: 'Code2', isFolder: true, items: [
@@ -145,7 +164,7 @@ export default function App() {
     setTimeout(() => setIsTransitioning(false), 500);
   };
 
-  const handleSmartBirth = (item: FolderItem | { name: string, icon: string, isRegistered: boolean, isTrigger?: boolean, isOrigin?: boolean, isDataProvider?: boolean }) => {
+  const handleSmartBirth = (item: Partial<CanvasItem>) => {
     const newInstanceId = `inst_${Date.now()}`;
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
@@ -164,7 +183,6 @@ export default function App() {
     setCanvasItems(prev => [...prev, newItem]);
     setActiveFolderView(null);
 
-    // Auto-gathering disabled as per request
     setIsTransitioning(true);
     const targetVX = windowSize.w / 2 - (newItem.x + 16) * zoom;
     const targetVY = windowSize.h / 2 - (newItem.y - HEADER_OFFSET + 16) * zoom;
@@ -182,19 +200,11 @@ export default function App() {
           : i
       ));
       
-      if (item.isTrigger || item.isDataProvider) {
-        setConnections(prev => prev.map(c => 
-          c.sourceId === editingItem.instanceId && c.color.includes('slate') 
-            ? { ...c, color: item.isTrigger ? 'orange-500' : 'fuchsia-500' } 
-            : c
-        ));
-      }
-      
       setEditingItem(null);
       setActiveFolderView(null);
       setFolderPath([]);
     } else {
-      handleSmartBirth(item);
+      handleSmartBirth(item as any);
     }
   };
 
@@ -274,11 +284,11 @@ export default function App() {
     let currentItems = path.length > 0 ? path[path.length - 1].items || [] : data.items;
     const currentTitle = path.length > 0 ? path[path.length - 1].name : data.title;
 
-    // CONTEXTUAL FILTERING:
-    const isEditingAmbiguousTop = editingItem && connections.some(c => c.sourceId === editingItem.instanceId && c.sourceSide === 'bottom' && c.targetSide === 'top' && canvasItems.find(i => i.instanceId === c.targetId)?.isOrigin);
+    // CONTEXTUAL FILTERING [Ambiguous Resolution Mode]
+    const isEditingAmbiguousPlaceholder = editingItem && !editingItem.isRegistered && connections.some(c => c.sourceId === editingItem.instanceId && canvasItems.find(i => i.instanceId === c.targetId)?.isOrigin);
 
     const isItemValid = (item: FolderItem): boolean => {
-      if (!isEditingAmbiguousTop) return true;
+      if (!isEditingAmbiguousPlaceholder) return true;
       if (item.isTrigger || item.isDataProvider) return true;
       if (item.isFolder && item.items) {
         return item.items.some(child => isItemValid(child));
@@ -336,7 +346,7 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems, connections);
-                          let strokeColor = conn.color.includes('emerald') ? '#10B981' : (conn.color.includes('rose') ? '#F43F5E' : (conn.color.includes('orange') ? '#F97316' : (conn.color.includes('amber') ? '#FBBF24' : (conn.color.includes('fuchsia') ? '#D946EF' : (conn.color.includes('slate') ? '#CBD5E1' : '#3B82F6')))));
+                          const strokeColor = resolveSignalColor(conn, s, t);
                           return (
                             <React.Fragment key={conn.id}>
                               <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeLinecap="round" />
@@ -350,14 +360,14 @@ export default function App() {
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems, connections);
-                          let strokeColor = activeTether.color.includes('emerald') ? '#10B981' : (activeTether.color.includes('rose') ? '#F43F5E' : (activeTether.color.includes('orange') ? '#F97316' : (activeTether.color.includes('amber') ? '#FBBF24' : (activeTether.color.includes('fuchsia') ? '#D946EF' : (activeTether.color.includes('slate') ? '#CBD5E1' : '#3B82F6')))));
+                          const strokeColor = resolveSignalColor(activeTether, s, t);
                           return <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeDasharray={`${6/zoom},${4/zoom}`} className="opacity-50" />;
                       })()}
                   </svg>
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)} className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                      <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isTrigger ? 'border-orange-500' : (item.isDataProvider ? 'border-fuchsia-500' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')))}`}>
-                        {item.isOrigin ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isTrigger ? 'text-orange-600' : (item.isDataProvider ? 'text-fuchsia-600' : (item.isRegistered ? 'text-slate-800' : 'text-emerald-500'))} />}
+                      <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isTrigger ? 'border-orange-400' : (item.isDataProvider ? 'border-fuchsia-500' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')))}`}>
+                        {item.isOrigin ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isTrigger ? 'text-orange-500' : (item.isDataProvider ? 'text-fuchsia-600' : (item.isRegistered ? 'text-slate-800' : 'text-emerald-500'))} />}
                         {LATCH_POINTS.map(lp => {
                           const { dotColor, isActive } = getPortState(item, lp, connections, activeTether);
                           return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
