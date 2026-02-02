@@ -139,7 +139,7 @@ export default function App() {
     setTimeout(() => setIsTransitioning(false), 500);
   };
 
-  const handleSmartBirth = (item: FolderItem | { name: string, icon: string, isRegistered: boolean, isTrigger?: boolean }) => {
+  const handleSmartBirth = (item: FolderItem | { name: string, icon: string, isRegistered: boolean, isTrigger?: boolean, isOrigin?: boolean }) => {
     const newInstanceId = `inst_${Date.now()}`;
     const screenCenterX = (windowSize.w / 2 - viewOffset.x) / zoom;
     const screenCenterY = (windowSize.h / 2 - viewOffset.y) / zoom;
@@ -349,8 +349,8 @@ export default function App() {
                   </svg>
                   {canvasItems.map(item => (
                     <div key={item.instanceId} onMouseDown={(e) => handleItemPointerDown(e, item)} onMouseUp={() => handleItemPointerUp(item)} onTouchStart={(e) => handleItemPointerDown(e, item)} onTouchEnd={() => handleItemPointerUp(item)} className={`absolute cursor-pointer flex items-center justify-center ${isDragging && draggingId === item.instanceId ? 'z-[1000]' : ''}`} style={{ left: item.x, top: item.y - HEADER_OFFSET, width: 32, height: 32 }}>
-                      <div className={`w-[30px] h-[30px] ${(item.isOrigin || item.isTrigger) ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${(item.isOrigin || item.isTrigger) ? 'border-slate-800' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300')}`}>
-                        {(item.isOrigin || item.isTrigger) ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isRegistered ? 'text-slate-800' : 'text-emerald-500'} />}
+                      <div className={`w-[30px] h-[30px] ${item.isOrigin ? 'bg-slate-900' : 'bg-white'} rounded-md shadow-sm flex items-center justify-center border relative ${item.isOrigin ? 'border-slate-800' : (item.isTrigger ? 'border-amber-400' : (item.isRegistered ? 'border-slate-200' : 'border-emerald-300'))}`}>
+                        {item.isOrigin ? <Shield size={16} className="text-white" /> : <SafeIcon name={item.icon} size={16} className={item.isTrigger ? 'text-amber-500' : (item.isRegistered ? 'text-slate-800' : 'text-emerald-500')} />}
                         {LATCH_POINTS.map(lp => {
                           const { dotColor, isActive } = getPortState(item, lp, connections, activeTether);
                           return <div key={lp.id} className={`absolute rounded-full border border-white shadow-sm transition-all duration-300 ${dotColor} ${isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`} style={{ left: `${lp.x * 100}%`, top: `${lp.y * 100}%`, transform: 'translate(-50%, -50%)', width: 8 / zoom, height: 8 / zoom }} />;
