@@ -4,17 +4,16 @@ import { GRID_SIZE, HEADER_OFFSET } from './constants';
 import { snapToGrid } from './pathing';
 
 /**
- * Island Gathering Engine v10.0 [Waterfall & Lane Isolation]
+ * Island Gathering Engine v11.0 [Waterfall Lane & Terminal Vertical Corridor Isolation]
  * Pure logic for Crossword (Adjacent) and Tether (Spaced) layout organization.
  * 
  * Rules:
- * 1. Data (Fuchsia) and Recursive (Blue) isolation occurs only in Grid mode.
- * 2. In Tether mode, all connections are part of a unified flow but respect directional corridors.
- * 3. Vertical Corridor Isolation: Yellow (Left) stays left of parent X. Red (Right) stays right.
- * 4. Horizontal Slice Isolation: Descendants always stay below parent Y.
- * 5. Terminal Waterfall: Terminal nodes of ancestors establish a horizontal slice that 
- *    descendant subtrees/islands must respect, forcing them downward.
- * 6. Outward Enforcement: Subtrees push siblings further outward horizontally to maintain lane integrity.
+ * 1. Mode Isolation: Grid mode (Crossword) uses adjacent spacing; Tether mode uses 2-cell gaps.
+ * 2. Vertical Lane Isolation (X-axis): Branches from a parent vertical slice are trapped in lanes.
+ * 3. Horizontal Slice Isolation (Y-axis): Descendants always stay below their parent's horizon.
+ * 4. Terminal Waterfall (Y-axis): Ancestor terminal nodes establish a horizontal "floor" for their zone.
+ * 5. Terminal Vertical Slice (X-axis): Descendant terminal nodes define the full width of their corridor.
+ *    Any expansion at the bottom of a tree pushes parallel ancestor/sibling trees strictly outward.
  */
 
 export interface LayoutResult {
@@ -37,17 +36,28 @@ export function calculateIslandLayout(
   const stepSize = mode === 'grid' ? GRID_SIZE : GRID_SIZE * 2;
   const islandGap = GRID_SIZE * (mode === 'grid' ? 4 : 8);
 
-  // Track global maximum Y per horizontal "zone" to enforce waterfall slices
-  const zoneMaxY = new Map<number, number>(); // snapToGrid(x) -> maxY
+  // Global registries for Waterfall (Y) and Corridor (X) enforcement
+  const zoneMaxY = new Map<number, number>(); // snapToGrid(x) -> maxY floor
+  const laneOccupancyX = new Map<number, { min: number, max: number }>(); // vertical level -> range used
 
-  const updateZoneY = (x: number, y: number) => {
-    const k = snapToGrid(x, 0);
-    zoneMaxY.set(k, Math.max(zoneMaxY.get(k) || 0, y));
+  const updateGlobalOccupancy = (x: number, y: number) => {
+    // Update Waterfall (Y)
+    const corridorX = snapToGrid(x, 0);
+    zoneMaxY.set(corridorX, Math.max(zoneMaxY.get(corridorX) || 0, y));
+
+    // Update Corridor (X) - Track used ranges per vertical slice to push siblings
+    const snapY = snapToGrid(y, HEADER_OFFSET);
+    const current = laneOccupancyX.get(snapY) || { min: x, max: x };
+    laneOccupancyX.set(snapY, {
+      min: Math.min(current.min, x),
+      max: Math.max(current.max, x)
+    });
   };
 
   /**
    * Directional Occupancy & Boundary Adjustment
    * Respects Vertical Lane (X), Horizontal Slice (Y), and Waterfall (maxY) boundaries.
+   * Enforces that subtrees push siblings/ancestors outward based on terminal footprints.
    */
   const findSafePosition = (
     startX: number, 
@@ -59,14 +69,14 @@ export function calculateIslandLayout(
   ) => {
     let tx = startX, ty = Math.max(startY, minY);
     
-    // Enforce Waterfall: Check if this vertical corridor has an ancestor terminal node "floor"
-    const zoneY = zoneMaxY.get(snapToGrid(tx, 0)) || 0;
-    if (mode === 'tether' && ty < zoneY + stepSize) {
-      ty = zoneY + stepSize;
+    // Enforce Waterfall Floor: Check if this vertical corridor has a terminal node floor above it
+    const zoneFloor = zoneMaxY.get(snapToGrid(tx, 0)) || 0;
+    if (mode === 'tether' && ty < zoneFloor + stepSize) {
+      ty = zoneFloor + stepSize;
     }
 
     let safety = 0;
-    // Enforce hard lane boundaries
+    // Enforce lane boundaries (Vertical Slices)
     if (tx < minX) tx = minX;
     if (tx > maxX) tx = maxX;
 
@@ -79,12 +89,12 @@ export function calculateIslandLayout(
         tx += stepSize;
       }
       
-      // Enforce boundaries
+      // Re-apply boundaries after shift
       if (tx < minX) tx = minX;
       if (tx > maxX) tx = maxX;
       if (ty < minY) ty = minY;
       
-      // If we hit a boundary but it's still occupied, we must go down
+      // If still occupied after lane shift, we must cascade downward
       if (occupied.has(getPosKey(tx, ty))) {
         ty += stepSize;
       }
@@ -93,7 +103,7 @@ export function calculateIslandLayout(
     return { tx, ty };
   };
 
-  // Fragmentation logic for Grid View isolation (only in Grid mode)
+  // Only fragment for Grid Mode (Crossword isolation)
   const isGrid = mode === 'grid';
   const flowConnections = isGrid 
     ? connections.filter(c => !c.color.includes('fuchsia') && !c.color.includes('blue'))
@@ -104,7 +114,7 @@ export function calculateIslandLayout(
     .filter(i => triggers.has(i.instanceId) || !connections.some(c => c.targetId === i.instanceId))
     .map(i => i.instanceId);
 
-  // 1. Standalone Pack (Top-Left High Density)
+  // 1. Pack Standalone Items (Top-Left Industrial Density)
   const connectedIds = new Set([
     ...connections.map(c => c.sourceId),
     ...connections.map(c => c.targetId)
@@ -123,10 +133,10 @@ export function calculateIslandLayout(
     item.y = ty;
     occupied.add(getPosKey(item.x, item.y));
     visited.add(item.instanceId);
-    updateZoneY(item.x, item.y);
+    updateGlobalOccupancy(item.x, item.y);
   });
 
-  // 2. Sequential Lane-Isolated Waterfall Layout
+  // 2. Sequential Waterfall Gathering with Corridor Pushing
   let currentIslandX = snapToGrid(windowSize.w / 2 - 16, 0);
   const startYBase = snapToGrid(windowSize.h * 0.4, HEADER_OFFSET);
 
@@ -139,7 +149,9 @@ export function calculateIslandLayout(
   sortedRoots.forEach((root) => {
     if (!root || visited.has(root.instanceId)) return;
     
-    let islandMaxX = currentIslandX;
+    // Tracks the horizontal "Terminal Slice" for this entire island
+    let islandExtentMinX = currentIslandX;
+    let islandExtentMaxX = currentIslandX;
 
     const processNode = (nodeId: string, cx: number, cy: number, minX: number, maxX: number, minY: number) => {
       if (visited.has(nodeId)) return;
@@ -150,15 +162,19 @@ export function calculateIslandLayout(
         node.x = cx; 
         node.y = cy; 
         occupied.add(getPosKey(cx, cy));
-        islandMaxX = Math.max(islandMaxX, cx);
-        updateZoneY(cx, cy);
+        
+        // Update the island's horizontal corridor footprint
+        islandExtentMinX = Math.min(islandExtentMinX, cx);
+        islandExtentMaxX = Math.max(islandExtentMaxX, cx);
+        
+        updateGlobalOccupancy(cx, cy);
       }
 
       const outgoing = flowConnections.filter(c => c.sourceId === nodeId);
       
-      // If node is terminal, ensure it updates the corridor's waterfall slice
+      // Terminal nodes establish the corridor's floor and vertical slice
       if (outgoing.length === 0 && mode === 'tether') {
-        updateZoneY(cx, cy);
+        updateGlobalOccupancy(cx, cy);
       }
 
       const sortedOutgoing = outgoing.sort((a, b) => {
@@ -173,6 +189,8 @@ export function calculateIslandLayout(
         let pushDir: 'left' | 'right' | 'bottom' = 'bottom';
         let childMinX = minX;
         let childMaxX = maxX;
+        
+        // Enforce Horizontal Slice Boundary: Children must be strictly below parent
         let childMinY = !isGrid ? cy + stepSize : -Infinity;
 
         if (conn.sourceSide === 'bottom') {
@@ -181,10 +199,12 @@ export function calculateIslandLayout(
         } else if (conn.sourceSide === 'right') {
           tx += stepSize;
           pushDir = 'right';
+          // Lock child to the right of parent vertical slice
           childMinX = Math.max(minX, cx + stepSize);
         } else if (conn.sourceSide === 'left') {
           tx -= stepSize;
           pushDir = 'left';
+          // Lock child to the left of parent vertical slice
           childMaxX = Math.min(maxX, cx - stepSize);
         }
 
@@ -201,14 +221,14 @@ export function calculateIslandLayout(
       });
     };
 
-    // Initialize island in its exclusive waterfall corridor
+    // Initialize island within its corridor
     processNode(root.instanceId, currentIslandX, startYBase, -Infinity, Infinity, -Infinity);
     
-    // Push the next island beyond the bounds of this logical tree
-    currentIslandX = snapToGrid(islandMaxX + islandGap, 0);
+    // Outward Push: The next island starts beyond the *widest* point of the previous subtree's corridor
+    currentIslandX = snapToGrid(islandExtentMaxX + islandGap, 0);
   });
 
-  // Center camera on primary origin
+  // Camera focus on origin
   const origin = newItems.find(i => i.isOrigin) || sortedRoots[0] || standalone[0];
   let targetVX = windowSize.w / 2 - (origin ? (origin.x + 16) : 0) * zoom;
   let targetVY = windowSize.h / 2 - (origin ? (origin.y - HEADER_OFFSET + 16) : 0) * zoom;
