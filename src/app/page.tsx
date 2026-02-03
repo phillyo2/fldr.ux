@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -15,28 +16,18 @@ import { calculateGhostHandshakes, getPortState, getTreeContext } from '@/lib/ha
 import { calculateIslandLayout } from '@/lib/layout-engine';
 
 /**
- * Signal Resolution Utility v2.0 [Port-Centric Protocol]
- * Centralizes the industrial color logic to ensure ports dictate flow identity.
+ * Industrial Signal Hex Mapping
+ * Maps engine color tokens to high-fidelity hex values for SVG rendering.
+ * This ensures the UI reflects the structural logic defined in the Handshake Engine.
  */
-const resolveSignalColor = (conn: Connection, source: CanvasItem | undefined, target: CanvasItem | undefined): string => {
-  if (!source || !target) return '#CBD5E1'; // Default Fallback (Slate-300)
-
-  // 1. UPSTREAM / ORIGIN SPECIALIZATION
-  if (target.isOrigin) {
-    if (source.isTrigger) return '#F97316'; // Vibrant Orange-500
-    if (source.isDataProvider) return '#D946EF'; // Industrial Fuchsia-500
-    if (!source.isRegistered) return '#CBD5E1'; // Ambiguous Placeholder (Gray)
-    return '#3B82F6'; // Registered Flow Recursive (Blue)
-  }
-
-  // 2. PORT-DRIVEN IDENTITY
-  switch (conn.sourceSide) {
-    case 'bottom': return '#10B981'; // Success / Main Flow (Emerald-500)
-    case 'right': return '#F43F5E';  // Error / Alternate (Rose-500)
-    case 'left': return '#FBBF24';   // Parallel / Peek (Amber-400)
-    case 'top': return '#3B82F6';    // Secondary Input (Blue-500)
-    default: return '#3B82F6';
-  }
+const SIGNAL_HEX: Record<string, string> = {
+  'orange-500': '#F97316',  // Trigger (WebHook, Cron, etc.)
+  'fuchsia-500': '#D946EF', // Data Provider (DBs, S3, etc.)
+  'slate-300': '#CBD5E1',   // Ambiguous (Detached Placeholder)
+  'blue-500': '#3B82F6',    // Main Flow / Recursive Loop
+  'emerald-500': '#10B981',  // Success Path (Bottom Port)
+  'rose-500': '#F43F5E',     // Error Path (Right Port)
+  'amber-400': '#FBBF24',    // Parallel Path (Left Port)
 };
 
 export default function App() {
@@ -256,6 +247,7 @@ export default function App() {
       const ghosts = calculateGhostHandshakes(itemsRef.current, connRef.current, draggingId!, { x, y });
       const best = ghosts[0] as any;
       if (best && (activeTether || best.dotDistance < SNAP_TOLERANCE)) { setActiveTether({ ...best }); }
+      else if (!best && activeTether) { setActiveTether(null); }
     };
     const handleUp = (e: MouseEvent | TouchEvent) => {
       setDragStartPos(null); if (pressTimer.current) clearTimeout(pressTimer.current);
@@ -275,7 +267,7 @@ export default function App() {
       setActiveTether(null); setIsDragging(false); setDraggingId(null);
     };
     window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
+    window.addEventListener('touchmove', handleMove); window.addEventListener('touchmove', handleMove); window.addEventListener('touchend', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); window.removeEventListener('touchmove', handleMove); window.removeEventListener('touchend', handleUp); };
   }, [isDragging, isPanning, draggingId, activeTether, dragStartPos, viewOffset, zoom, canvasItems]);
 
@@ -284,7 +276,7 @@ export default function App() {
     let currentItems = path.length > 0 ? path[path.length - 1].items || [] : data.items;
     const currentTitle = path.length > 0 ? path[path.length - 1].name : data.title;
 
-    // CONTEXTUAL FILTERING [Ambiguous Resolution Mode]
+    // AMBIGUITY FILTER: Only trigger when an unattached placeholder targets an Entry Point
     const isEditingAmbiguousPlaceholder = editingItem && !editingItem.isRegistered && connections.some(c => c.sourceId === editingItem.instanceId && canvasItems.find(i => i.instanceId === c.targetId)?.isOrigin);
 
     const isItemValid = (item: FolderItem): boolean => {
@@ -346,7 +338,10 @@ export default function App() {
                           const sX = s.x + (conn.sourceSide === 'right' ? 32 : (conn.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (conn.sourceSide === 'bottom' ? 32 : (conn.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (conn.targetSide === 'right' ? 32 : (conn.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (conn.targetSide === 'bottom' ? 32 : (conn.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, conn.sourceSide, conn.targetSide, conn.sourceId, conn.targetId, canvasItems, connections);
-                          const strokeColor = resolveSignalColor(conn, s, t);
+                          
+                          // Use pure engine tokens mapped to high-fidelity hex
+                          const strokeColor = SIGNAL_HEX[conn.color] || conn.color || '#CBD5E1';
+                          
                           return (
                             <React.Fragment key={conn.id}>
                               <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeLinecap="round" />
@@ -360,7 +355,10 @@ export default function App() {
                           const sX = s.x + (activeTether.sourceSide === 'right' ? 32 : (activeTether.sourceSide === 'left' ? 0 : 16)), sY = s.y - HEADER_OFFSET + (activeTether.sourceSide === 'bottom' ? 32 : (activeTether.sourceSide === 'top' ? 0 : 16));
                           const tX = t.x + (activeTether.targetSide === 'right' ? 32 : (activeTether.targetSide === 'left' ? 0 : 16)), tY = t.y - HEADER_OFFSET + (activeTether.targetSide === 'bottom' ? 32 : (activeTether.targetSide === 'top' ? 0 : 16));
                           const pathData = getSmartPath(sX, sY, tX, tY, activeTether.sourceSide, activeTether.targetSide, activeTether.sourceId, activeTether.targetId, canvasItems, connections);
-                          const strokeColor = resolveSignalColor(activeTether, s, t);
+                          
+                          // Use pure engine tokens mapped to high-fidelity hex
+                          const strokeColor = SIGNAL_HEX[activeTether.color] || activeTether.color || '#CBD5E1';
+                          
                           return <path d={pathData.d} stroke={strokeColor} strokeWidth={3 / zoom} fill="none" strokeDasharray={`${6/zoom},${4/zoom}`} className="opacity-50" />;
                       })()}
                   </svg>
